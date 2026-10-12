@@ -51,7 +51,7 @@ textarea{min-height:90px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "1.0.1";
+  var APP_VERSION = "1.1.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
@@ -113,6 +113,7 @@ textarea{min-height:90px}
     S.busy = true; render();
     return call("list").then(function (r) {
       S.busy = false;
+      if (!r.ok && r.mustChange) { S.user.mustChange = true; ls("user", S.user); S.view = "pin"; render(); return; }   /* 1.1.0 */
       if (!r.ok) { if (/wrong name|pin/i.test(r.error || "")) { signOut(); } S.err = r.error || "Could not load"; render(); return; }
       S.sites = r.sites || []; S.stages = r.stages || S.stages; S.partners = r.partners || [];
       ls("sites", S.sites); ls("stages", S.stages); if (canMap()) ls("partners", S.partners); else ls("partners", null);
@@ -130,6 +131,7 @@ textarea{min-height:90px}
     return top() + '<div class="wrap"><div class="card"><h2 style="margin:0 0 6px">Sign in</h2>' +
       '<label for="nm">Your name</label><input id="nm" autocomplete="username" value="' + esc(S.nm || ls("lastName") || "") + '">' +
       '<label for="pn">PIN</label><input id="pn" type="password" inputmode="numeric" autocomplete="current-password">' +
+      '<div class="meta" style="margin-top:6px">First time? Your PIN is the last 4 digits of your mobile number. Forgot your PIN? Ask the owner to reset it.</div>' +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       '<div style="margin-top:12px"><button class="btn" data-a="signin" style="width:100%">' + (S.busy ? 'Checking…' : 'Sign in') + '</button></div></div>' +
       '<p class="meta" style="text-align:center">Version ' + APP_VERSION + '</p></div>';
@@ -153,7 +155,9 @@ textarea{min-height:90px}
         '<div>' + (s.stage ? '<span class="pill">' + esc(s.stage) + '</span>' : '') + (s.architect ? '<span class="pill">Arch: ' + esc(s.architect) + '</span>' : '') + (s.builder ? '<span class="pill">Builder: ' + esc(s.builder) + '</span>' : '') + '</div>' +
         '<div class="meta">' + esc(dmy(s.createdAt)) + (s.createdBy ? ' · ' + esc(s.createdBy) : '') + '</div><div style="clear:both"></div></div>';
     }).join("");
-    h += '<div style="text-align:center;margin-top:20px"><button class="btn ghost sm" data-a="signout">Sign out</button><div class="meta" style="margin-top:6px">Version ' + APP_VERSION + '</div></div></div>';
+    h += '<div style="text-align:center;margin-top:20px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
+      (S.user.role === "admin" ? '<button class="btn ghost sm" data-a="people">People</button>' : '') +
+      '<button class="btn ghost sm" data-a="chpin">Change PIN</button><button class="btn ghost sm" data-a="signout">Sign out</button></div><div style="text-align:center"><div class="meta" style="margin-top:6px">Version ' + APP_VERSION + '</div></div></div>';
     if (canMap()) h += '<button class="btn fab" data-a="new">+ New site</button>';
     return h;
   }
@@ -205,10 +209,41 @@ textarea{min-height:90px}
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       '<div style="margin-top:14px"><button class="btn" data-a="save" style="width:100%">Save site</button></div></div></div>';
   }
+  /* 1.1.0 - his own PIN. The first one is the last 4 digits of his mobile; he replaces it at once. */
+  function pinScreen() {
+    var first = !!S.user.mustChange;
+    return top() + '<div class="wrap">' + (first ? '' : '<button class="btn ghost sm" data-a="back">‹ Back</button>') +
+      '<div class="card"><h2 style="margin:0 0 6px">' + (first ? 'Choose your own PIN' : 'Change PIN') + '</h2>' +
+      (first ? '<div class="meta">You signed in with the last 4 digits of your mobile. Choose your own PIN now - only you will know it.</div>' : '') +
+      '<label for="np1">New PIN (4 to 6 digits)</label><input id="np1" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6">' +
+      '<label for="np2">New PIN again</label><input id="np2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6">' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      '<div style="margin-top:12px"><button class="btn" data-a="setpin" style="width:100%">' + (S.busy ? 'Saving…' : 'Save my PIN') + '</button></div>' +
+      (first ? '<div style="text-align:center;margin-top:10px"><button class="btn ghost sm" data-a="signout">Sign out</button></div>' : '') + '</div></div>';
+  }
+  /* 1.1.0 - the owner's list: who can sign in, and Reset for a forgotten PIN (two taps) */
+  function peopleScreen() {
+    var ps = S.people;
+    return top() + '<div class="wrap"><button class="btn ghost sm" data-a="back">‹ All sites</button>' +
+      '<div class="card"><h2 style="margin:0 0 6px">People</h2><div class="meta">Reset sends a forgotten PIN back to the last 4 digits of that person\'s mobile. He chooses a new one when he signs in. To add someone or stop someone, use the People tab in the sheet.</div>' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      (!ps ? '<div class="meta" style="margin-top:10px">Loading…</div>' : ps.map(function (x) {
+        var arm = S.resetArm === x.name;
+        return '<div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:10px 0"><div style="flex:1"><b>' + esc(x.name) + '</b><div class="meta">' + esc(x.role) + ' · ' + esc(x.state) + '</div></div>' +
+          '<button class="btn sm ' + (arm ? '' : 'ghost') + '" data-a="resetpin" data-who="' + esc(x.name) + '">' + (arm ? 'Tap again to reset' : 'Reset PIN') + '</button></div>';
+      }).join("")) + '</div></div>';
+  }
+  function loadPeople() {
+    S.people = null; S.err = ""; render();
+    call("people").then(function (r) { if (!r.ok) { S.err = r.error || "Could not load"; S.people = []; } else S.people = r.people || []; render(); })
+      .catch(function () { S.err = "No signal - try again."; S.people = []; render(); });
+  }
   function render() {
     var app = document.getElementById("app");
     var keep = document.activeElement && document.activeElement.id;
     if (!S.user) app.innerHTML = signIn();
+    else if (S.user.mustChange || S.view === "pin") app.innerHTML = pinScreen();
+    else if (S.view === "people") app.innerHTML = peopleScreen();
     else if (S.view === "form") app.innerHTML = form();
     else if (S.view === "detail") app.innerHTML = detail();
     else app.innerHTML = list();
@@ -259,16 +294,41 @@ textarea{min-height:90px}
       call("auth").then(function (r) {
         S.busy = false;
         if (!r.ok) { S.user = null; S.err = r.error || "Could not sign in"; render(); return; }
-        S.user = { name: r.user.name, role: r.user.role, pin: pn }; S.stages = r.stages || [];
-        ls("user", S.user); ls("lastName", r.user.name); ls("stages", S.stages); render(); pull();
+        S.user = { name: r.user.name, role: r.user.role, pin: pn, mustChange: !!r.user.mustChange }; S.stages = r.stages || [];
+        ls("user", S.user); ls("lastName", r.user.name); ls("stages", S.stages);
+        if (S.user.mustChange) { S.view = "pin"; render(); return; }   /* 1.1.0 - first sign-in: choose your own PIN */
+        render(); pull();
       }).catch(function (e) { S.busy = false; S.user = null; S.err = String(e && e.message || "No signal - try again."); render(); });
       return;
     }
-    if (a === "refresh") { flush().then(pull); return; }
+    if (a === "refresh") { if (S.view === "people") { loadPeople(); return; } flush().then(pull); return; }
+    if (a === "chpin") { S.err = ""; S.view = "pin"; render(); window.scrollTo(0, 0); return; }
+    if (a === "people") { S.view = "people"; S.resetArm = ""; loadPeople(); window.scrollTo(0, 0); return; }
+    if (a === "setpin") {
+      var n1 = document.getElementById("np1").value.trim(), n2 = document.getElementById("np2").value.trim();
+      if (!/^\d{4,6}$/.test(n1)) { S.err = "The new PIN must be 4 to 6 digits."; render(); return; }
+      if (n1 !== n2) { S.err = "The two PINs are not the same - type them again."; render(); return; }
+      S.busy = true; S.err = ""; render();
+      call("setpin", { newPin: n1 }).then(function (r) {
+        S.busy = false;
+        if (!r.ok) { S.err = r.error || "Not saved"; render(); return; }
+        S.user.pin = n1; S.user.mustChange = false; ls("user", S.user); S.view = "list"; render(); toast("Your new PIN is saved.");
+        flush().then(pull);
+      }).catch(function () { S.busy = false; S.err = "No signal - try again."; render(); });
+      return;
+    }
+    if (a === "resetpin") {
+      var who = t.getAttribute("data-who");
+      if (S.resetArm !== who) { S.resetArm = who; render(); setTimeout(function () { if (S.resetArm === who) { S.resetArm = ""; render(); } }, 6000); return; }
+      S.resetArm = "";
+      call("resetpin", { who: who }).then(function (r) { if (!r.ok) { S.err = r.error || "Not reset"; render(); return; } toast(who + "'s PIN is reset to the last 4 digits of the mobile."); loadPeople(); })
+        .catch(function () { S.err = "No signal - try again."; render(); });
+      return;
+    }
     if (a === "flush") { flush(); return; }
     if (a === "signout") { if (outbox().length && !confirmTwice(t)) return; signOut(); return; }
     if (a === "open") { S.open = t.getAttribute("data-id"); S.view = "detail"; render(); window.scrollTo(0, 0); return; }
-    if (a === "back") { S.view = "list"; render(); return; }
+    if (a === "back") { S.view = "list"; S.err = ""; render(); return; }
     if (a === "new") { S.edit = { city: "Panipat", _new: [] }; S.err = ""; S.view = "form"; render(); window.scrollTo(0, 0); return; }
     if (a === "edit") { var s = S.sites.filter(function (x) { return x.id === t.getAttribute("data-id"); })[0]; S.edit = Object.assign({}, s, { _new: [] }); S.err = ""; S.view = "form"; render(); return; }
     if (a === "cancel") { S.view = S.edit && S.edit.id ? "detail" : "list"; S.edit = null; S.err = ""; render(); return; }

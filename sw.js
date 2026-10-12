@@ -1,6 +1,6 @@
 /* Saysha - Site Map. The app's own files: network first, the shelf when there is no signal.
    The server's answers are never kept here (the app keeps its own copy). */
-var C = "sk-map-3";
+var C = "sk-map-4";
 self.addEventListener("install", function (e) { e.waitUntil(caches.open(C).then(function (c) { return c.addAll(["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "logo.png"]); })); self.skipWaiting(); });
 self.addEventListener("activate", function (e) { e.waitUntil(caches.keys().then(function (ks) { return Promise.all(ks.filter(function (k) { return k !== C; }).map(function (k) { return caches.delete(k); })); })); self.clients.claim(); });
 self.addEventListener("fetch", function (e) {
