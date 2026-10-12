@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#214368">
+<title>Saysha - Site Map</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--ink:#1C2B3D;--ink2:#214368;--paper:#F5F6F8;--card:#FFFFFF;--line:#DDE2E9;--acc:#214368;--acc2:#214368;--gold:#C9962E;--muted:#5D6877;--ok:#2F6B3F;--bad:#A33A2A}   /* the Saysha logo: navy and gold */
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
+.top{position:sticky;top:0;z-index:5;background:#fff;color:var(--ink);padding:8px 14px;display:flex;align-items:center;gap:10px;border-bottom:3px solid var(--gold)}
+.top img{height:40px;width:auto;display:block}
+.top .sub{font-size:13px;color:var(--muted);font-weight:600}
+.top .sp{flex:1}
+.wrap{max-width:720px;margin:0 auto;padding:12px 14px 90px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.btn{min-height:44px;padding:10px 14px;border-radius:10px;border:0;background:var(--acc);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--acc2);border:1px solid var(--acc)}
+.btn.dk{background:var(--ink2)}
+.btn.sm{min-height:44px;padding:8px 12px;font-size:14px}
+.btn[disabled]{opacity:.5}
+.top .btn{background:transparent;border:1px solid var(--acc);color:var(--acc)}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+input,select,textarea{width:100%;min-height:44px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:16px;color:var(--ink);font-family:inherit}
+textarea{min-height:90px}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+.meta{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:20px;background:#E8EEF5;color:var(--acc2);margin:2px 4px 2px 0}
+.site h3{margin:0 0 2px;font-size:17px}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.acts a,.acts button{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.thumbs img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#eee}
+.fab{position:fixed;right:16px;bottom:18px;z-index:6;border-radius:28px;padding:14px 20px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.note{background:#FFF6E8;border:1px solid #EBCFA6;border-radius:10px;padding:10px;font-size:14px;margin:10px 0}
+.err{background:#FBEAE7;border-color:#E3B1A8;color:var(--bad)}
+.toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;max-width:90vw}
+.empty{text-align:center;color:var(--muted);padding:30px 10px}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:14px}.kv div:nth-child(odd){color:var(--muted)}
+.sugg{border:1px solid var(--line);border-radius:10px;margin-top:4px;max-height:220px;overflow:auto;background:#fff}
+.sugg button{display:block;width:100%;text-align:left;min-height:44px;padding:8px 10px;border:0;border-bottom:1px solid var(--line);background:#fff;font-size:15px;color:var(--ink)}
+.sugg button small{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+  "use strict";
+  var APP_VERSION = "1.0.0";
+  /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
+  var API = "";
+  var K = "sk_";
+  var S = { user: null, sites: [], partners: [], stages: [], view: "list", q: "", edit: null, busy: false, err: "", open: null, sugg: null };
+
+  function ls(k, v) { try { if (v === undefined) { var x = localStorage.getItem(K + k); return x ? JSON.parse(x) : null; } if (v === null) localStorage.removeItem(K + k); else localStorage.setItem(K + k, JSON.stringify(v)); } catch (e) { return null; } }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function toast(t) { var d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(function () { d.remove(); }, 3200); }
+  function dmy(iso) { var d = new Date(iso); if (isNaN(d)) return ""; return String(d.getDate()).padStart(2, "0") + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + d.getFullYear(); }
+  function photosOf(s) { try { var a = JSON.parse(s.photos || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+
+  function call(action, extra) {
+    if (!API) return Promise.reject(new Error("The app is not linked to its server yet"));
+    var b = Object.assign({ action: action, user: S.user && S.user.name, pin: S.user && S.user.pin }, extra || {});
+    return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(b) })
+      .then(function (r) { return r.json(); });
+  }
+  function canMap() { return S.user && (S.user.role === "mapper" || S.user.role === "admin"); }
+
+  /* ---------- the outbox: a save made with no signal waits here and goes when the line is back ---------- */
+  function outbox() { return ls("outbox") || []; }
+  function flush() {
+    var q = outbox(); if (!q.length || S.flushing) return Promise.resolve();
+    S.flushing = true;
+    var job = q[0];
+    var p = Promise.resolve(job.site);
+    var pend = (job.newPhotos || []).slice();
+    pend.forEach(function (b64) {
+      p = p.then(function (site) {
+        return call("photo", { b64: b64 }).then(function (r) {
+          if (!r.ok) throw new Error(r.error || "Photo not saved");
+          var a = photosOf(site); a.push(r.url); site.photos = JSON.stringify(a);
+          job.newPhotos.shift(); job.site = site; var qq = outbox(); qq[0] = job; ls("outbox", qq);
+          return site;
+        });
+      });
+    });
+    return p.then(function (site) { return call("save", { site: site }); }).then(function (r) {
+      if (!r.ok) throw new Error(r.error || "Not saved");
+      var qq = outbox(); qq.shift(); ls("outbox", qq);
+      upsert(r.site);
+      S.flushing = false; render();
+      return flush();
+    }).catch(function (e) {
+      S.flushing = false;
+      var m = String(e && e.message || e);
+      if (/only|give the|needs 10|too big/i.test(m)) { var qq = outbox(); qq.shift(); ls("outbox", qq); S.err = "Not saved: " + m; render(); return; }
+      render();
+    });
+  }
+  function upsert(site) {
+    if (!site) return;
+    var i = S.sites.findIndex(function (x) { return x.id === site.id; });
+    if (i >= 0) S.sites[i] = site; else S.sites.unshift(site);
+    ls("sites", S.sites);
+  }
+
+  function pull() {
+    S.busy = true; render();
+    return call("list").then(function (r) {
+      S.busy = false;
+      if (!r.ok) { if (/wrong name|pin/i.test(r.error || "")) { signOut(); } S.err = r.error || "Could not load"; render(); return; }
+      S.sites = r.sites || []; S.stages = r.stages || S.stages; S.partners = r.partners || [];
+      ls("sites", S.sites); ls("stages", S.stages); if (canMap()) ls("partners", S.partners); else ls("partners", null);
+      S.err = ""; ls("pulledAt", Date.now()); render();
+    }).catch(function () { S.busy = false; S.err = "No signal - showing what this phone already has."; render(); });
+  }
+  function signOut() { ["user", "sites", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
+
+  /* ---------- screens ---------- */
+  function top() {
+    return '<div class="top"><img src="logo.png" alt="Saysha"><div><div class="sub">Site Map' + (S.user ? ' · ' + esc(S.user.name) : '') + '</div></div><div class="sp"></div>' +
+      (S.user ? '<button class="btn sm" data-a="refresh">' + (S.busy ? 'Loading…' : 'Refresh') + '</button>' : '') + '</div>';
+  }
+  function signIn() {
+    return top() + '<div class="wrap"><div class="card"><h2 style="margin:0 0 6px">Sign in</h2>' +
+      '<label for="nm">Your name</label><input id="nm" autocomplete="username" value="' + esc(S.nm || ls("lastName") || "") + '">' +
+      '<label for="pn">PIN</label><input id="pn" type="password" inputmode="numeric" autocomplete="current-password">' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      '<div style="margin-top:12px"><button class="btn" data-a="signin" style="width:100%">' + (S.busy ? 'Checking…' : 'Sign in') + '</button></div></div>' +
+      '<p class="meta" style="text-align:center">Version ' + APP_VERSION + '</p></div>';
+  }
+  function list() {
+    var q = S.q.trim().toLowerCase();
+    var rows = S.sites.filter(function (s) { if (!q) return true; return [s.client, s.mobile, s.address, s.area, s.architect, s.builder, s.stage].join(" ").toLowerCase().indexOf(q) >= 0; });
+    var ob = outbox().length;
+    var h = top() + '<div class="wrap">' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      (ob ? '<div class="note">' + ob + ' site' + (ob > 1 ? 's' : '') + ' waiting to go up - they go as soon as there is signal. <button class="btn sm" data-a="flush">Send now</button></div>' : '') +
+      '<input id="q" placeholder="Search name, mobile, area, architect…" value="' + esc(S.q) + '">' +
+      '<div class="meta" style="margin:8px 2px">' + rows.length + ' of ' + S.sites.length + ' sites</div>';
+    if (!rows.length) h += '<div class="empty">' + (S.sites.length ? 'Nothing matches.' : (canMap() ? 'No sites yet. Tap "+ New site" to add the first one.' : 'No sites yet.')) + '</div>';
+    h += rows.slice(0, 300).map(function (s) {
+      var ph = photosOf(s);
+      return '<div class="card site" data-a="open" data-id="' + esc(s.id) + '">' +
+        (ph[0] ? '<img src="' + esc(ph[0]) + '" alt="" style="float:right;width:64px;height:64px;object-fit:cover;border-radius:8px;margin-left:8px" loading="lazy">' : '') +
+        '<h3>' + esc(s.client || "(no name)") + '</h3>' +
+        '<div class="meta">' + esc([s.address, s.area].filter(Boolean).join(", ")) + '</div>' +
+        '<div>' + (s.stage ? '<span class="pill">' + esc(s.stage) + '</span>' : '') + (s.architect ? '<span class="pill">Arch: ' + esc(s.architect) + '</span>' : '') + (s.builder ? '<span class="pill">Builder: ' + esc(s.builder) + '</span>' : '') + '</div>' +
+        '<div class="meta">' + esc(dmy(s.createdAt)) + (s.createdBy ? ' · ' + esc(s.createdBy) : '') + '</div><div style="clear:both"></div></div>';
+    }).join("");
+    h += '<div style="text-align:center;margin-top:20px"><button class="btn ghost sm" data-a="signout">Sign out</button><div class="meta" style="margin-top:6px">Version ' + APP_VERSION + '</div></div></div>';
+    if (canMap()) h += '<button class="btn fab" data-a="new">+ New site</button>';
+    return h;
+  }
+  function mapLink(s) { return s.lat && s.lng ? "https://www.google.com/maps/search/?api=1&query=" + s.lat + "," + s.lng : (s.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([s.address, s.area, s.city].filter(Boolean).join(", ")) : ""); }
+  function detail() {
+    var s = S.sites.filter(function (x) { return x.id === S.open; })[0];
+    if (!s) { S.view = "list"; return list(); }
+    var ml = mapLink(s), ph = photosOf(s), mob = String(s.mobile || "");
+    return top() + '<div class="wrap"><button class="btn ghost sm" data-a="back">‹ All sites</button>' +
+      '<div class="card"><h2 style="margin:0 0 4px">' + esc(s.client || "(no name)") + '</h2>' +
+      '<div class="kv">' +
+      '<div>Mobile</div><div>' + esc(mob) + '</div>' +
+      '<div>Address</div><div>' + esc(s.address) + '</div>' +
+      '<div>Area</div><div>' + esc([s.area, s.city].filter(Boolean).join(", ")) + '</div>' +
+      '<div>Stage</div><div>' + esc(s.stage) + '</div>' +
+      '<div>Architect</div><div>' + esc(s.architect) + '</div>' +
+      '<div>Builder</div><div>' + esc(s.builder) + '</div>' +
+      '<div>Measurements</div><div style="white-space:pre-wrap">' + esc(s.measure) + '</div>' +
+      '<div>Notes</div><div style="white-space:pre-wrap">' + esc(s.notes) + '</div>' +
+      '<div>Added</div><div>' + esc(dmy(s.createdAt)) + ' by ' + esc(s.createdBy) + '</div>' +
+      '</div>' +
+      (ph.length ? '<div class="thumbs">' + ph.map(function (u) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="Site photo" loading="lazy"></a>'; }).join("") + '</div>' : '') +
+      '<div class="acts">' +
+      (mob ? '<a class="btn sm" href="tel:' + esc(mob) + '">Call</a><a class="btn sm dk" href="https://wa.me/91' + esc(mob) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+      (ml ? '<a class="btn sm dk" href="' + esc(ml) + '" target="_blank" rel="noopener">Open in Maps</a>' : '') +
+      (canMap() ? '<button class="btn sm ghost" data-a="edit" data-id="' + esc(s.id) + '">Edit</button>' : '') +
+      '</div></div></div>';
+  }
+  function field(id, lab, v, extra) { return '<label for="' + id + '">' + lab + '</label><input id="' + id + '" value="' + esc(v || "") + '"' + (extra || "") + '>'; }
+  function form() {
+    var e = S.edit;
+    var stages = (S.stages.length ? S.stages : ls("stages") || []);
+    var gps = e.lat && e.lng ? 'Location saved (' + Number(e.lat).toFixed(5) + ', ' + Number(e.lng).toFixed(5) + (e.acc ? ', within ' + Math.round(e.acc) + ' m' : '') + ')' : 'No location yet - stand at the site and tap the button.';
+    var ph = photosOf(e).concat((e._new || []).map(function (b) { return "data:image/jpeg;base64," + b; }));
+    return top() + '<div class="wrap"><button class="btn ghost sm" data-a="cancel">‹ Back</button>' +
+      '<div class="card"><h2 style="margin:0 0 4px">' + (e.id ? 'Edit site' : 'New site') + '</h2>' +
+      field("f_client", "Client name", e.client) +
+      field("f_mobile", "Mobile (10 digits)", e.mobile, ' inputmode="tel"') +
+      field("f_address", "Site address (plot, sector)", e.address) +
+      '<div class="row"><div>' + field("f_area", "Area / colony", e.area) + '</div><div>' + field("f_city", "City", e.city || "Panipat") + '</div></div>' +
+      '<label>Site location</label><div class="meta" id="gpsmsg">' + esc(gps) + '</div><button class="btn sm dk" data-a="gps" style="margin-top:6px">Use my current location</button>' +
+      '<label for="f_stage">Stage of work</label><select id="f_stage"><option value=""></option>' + stages.map(function (x) { return '<option' + (x === e.stage ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join("") + '</select>' +
+      '<label for="f_architect">Architect</label><input id="f_architect" data-pick="Architect" autocomplete="off" value="' + esc(e.architect || "") + '"><div id="sg_f_architect"></div>' +
+      '<label for="f_builder">Builder / PMC</label><input id="f_builder" data-pick="Builder" autocomplete="off" value="' + esc(e.builder || "") + '"><div id="sg_f_builder"></div>' +
+      '<label for="f_measure">Measurements</label><textarea id="f_measure" placeholder="Kitchen size, walls, heights…">' + esc(e.measure || "") + '</textarea>' +
+      '<label for="f_notes">Notes</label><textarea id="f_notes">' + esc(e.notes || "") + '</textarea>' +
+      '<label>Photos</label>' + (ph.length ? '<div class="thumbs">' + ph.map(function (u) { return '<img src="' + esc(u) + '" alt="">'; }).join("") + '</div>' : '<div class="meta">No photos yet.</div>') +
+      '<label class="btn sm dk" style="display:inline-flex;align-items:center;margin-top:6px;color:#fff">+ Add photo<input id="f_photo" type="file" accept="image/*" capture="environment" multiple style="display:none"></label>' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      '<div style="margin-top:14px"><button class="btn" data-a="save" style="width:100%">Save site</button></div></div></div>';
+  }
+  function render() {
+    var app = document.getElementById("app");
+    var keep = document.activeElement && document.activeElement.id;
+    if (!S.user) app.innerHTML = signIn();
+    else if (S.view === "form") app.innerHTML = form();
+    else if (S.view === "detail") app.innerHTML = detail();
+    else app.innerHTML = list();
+    if (keep === "q") { var q = document.getElementById("q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+  }
+
+  /* ---------- the architect / builder picker: the list is on the mapper's phone only ---------- */
+  function suggest(inp) {
+    var box = document.getElementById("sg_" + inp.id); if (!box) return;
+    var want = inp.getAttribute("data-pick"), t = inp.value.trim().toLowerCase();
+    if (t.length < 1) { box.innerHTML = ""; return; }
+    var hits = (S.partners || []).filter(function (p) {
+      var roleOk = want === "Architect" ? p.r === "Architect" : (p.r === "Builder" || p.r === "PMC");
+      return roleOk && (p.n.toLowerCase().indexOf(t) >= 0 || String(p.a || "").toLowerCase().indexOf(t) >= 0);
+    }).slice(0, 8);
+    var exact = hits.some(function (p) { return p.n.toLowerCase() === t; });
+    box.innerHTML = (hits.length || !exact) ? '<div class="sugg">' + hits.map(function (p) { return '<button type="button" data-a="pick" data-for="' + inp.id + '" data-v="' + esc(p.n) + '">' + esc(p.n) + (p.a ? ' <small>' + esc(p.a) + '</small>' : '') + ' <small>' + esc(p.r) + '</small></button>'; }).join("") +
+      (!exact ? '<button type="button" data-a="pick" data-for="' + inp.id + '" data-v="' + esc(inp.value.trim()) + '">Use "' + esc(inp.value.trim()) + '" as a new name</button>' : '') + '</div>' : "";
+  }
+
+  function readForm() {
+    var e = S.edit, g = function (id) { var x = document.getElementById(id); return x ? x.value : undefined; };
+    ["client", "mobile", "address", "area", "city", "stage", "architect", "builder", "measure", "notes"].forEach(function (k) { var v = g("f_" + k); if (v !== undefined) e[k] = v.trim(); });
+  }
+  /* a phone photo is 3-6 MB; it goes up as a 1280-pixel JPEG of about 200 KB */
+  function shrink(file) {
+    return new Promise(function (ok, bad) {
+      var img = new Image(), url = URL.createObjectURL(file);
+      img.onload = function () {
+        var m = 1280, w = img.naturalWidth, h = img.naturalHeight, sc = Math.min(1, m / Math.max(w, h));
+        var c = document.createElement("canvas"); c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        ok(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+      };
+      img.onerror = function () { bad(new Error("That photo could not be read")); };
+      img.src = url;
+    });
+  }
+
+  document.addEventListener("click", function (ev) {
+    var t = ev.target.closest("[data-a]"); if (!t) return;
+    var a = t.getAttribute("data-a");
+    if (a === "signin") {
+      var nm = document.getElementById("nm").value.trim(), pn = document.getElementById("pn").value.trim();
+      S.nm = nm;   /* a wrong PIN must not wipe the name he typed */
+      if (!nm || !pn) { S.err = "Type your name and PIN."; render(); return; }
+      S.busy = true; S.err = ""; S.user = { name: nm, pin: pn }; render();
+      call("auth").then(function (r) {
+        S.busy = false;
+        if (!r.ok) { S.user = null; S.err = r.error || "Could not sign in"; render(); return; }
+        S.user = { name: r.user.name, role: r.user.role, pin: pn }; S.stages = r.stages || [];
+        ls("user", S.user); ls("lastName", r.user.name); ls("stages", S.stages); render(); pull();
+      }).catch(function (e) { S.busy = false; S.user = null; S.err = String(e && e.message || "No signal - try again."); render(); });
+      return;
+    }
+    if (a === "refresh") { flush().then(pull); return; }
+    if (a === "flush") { flush(); return; }
+    if (a === "signout") { if (outbox().length && !confirmTwice(t)) return; signOut(); return; }
+    if (a === "open") { S.open = t.getAttribute("data-id"); S.view = "detail"; render(); window.scrollTo(0, 0); return; }
+    if (a === "back") { S.view = "list"; render(); return; }
+    if (a === "new") { S.edit = { city: "Panipat", _new: [] }; S.err = ""; S.view = "form"; render(); window.scrollTo(0, 0); return; }
+    if (a === "edit") { var s = S.sites.filter(function (x) { return x.id === t.getAttribute("data-id"); })[0]; S.edit = Object.assign({}, s, { _new: [] }); S.err = ""; S.view = "form"; render(); return; }
+    if (a === "cancel") { S.view = S.edit && S.edit.id ? "detail" : "list"; S.edit = null; S.err = ""; render(); return; }
+    if (a === "pick") { var inp = document.getElementById(t.getAttribute("data-for")); inp.value = t.getAttribute("data-v"); document.getElementById("sg_" + inp.id).innerHTML = ""; return; }
+    if (a === "gps") {
+      readForm();
+      var msg = document.getElementById("gpsmsg"); if (msg) msg.textContent = "Finding the location…";
+      if (!navigator.geolocation) { if (msg) msg.textContent = "This phone cannot give a location."; return; }
+      navigator.geolocation.getCurrentPosition(function (p) {
+        S.edit.lat = Number(p.coords.latitude.toFixed(6)); S.edit.lng = Number(p.coords.longitude.toFixed(6)); S.edit.acc = Math.round(p.coords.accuracy || 0); render();
+      }, function () { if (msg) msg.textContent = "Location not found - turn on location and try again."; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+      return;
+    }
+    if (a === "save") {
+      readForm();
+      var e = S.edit, mob = String(e.mobile || "").replace(/\D/g, "").slice(-10);
+      if (!e.client && !e.address) { S.err = "Give the client's name or the site address."; render(); return; }
+      if (e.mobile && mob.length !== 10) { S.err = "The mobile number needs 10 digits."; render(); return; }
+      e.mobile = mob;
+      if (!e.id) e.id = "SK-" + Date.now() + "-" + Math.floor(Math.random() * 900 + 100);   /* made here, so sending twice never makes two */
+      var site = {}; ["id", "client", "mobile", "address", "area", "city", "lat", "lng", "acc", "stage", "architect", "builder", "measure", "notes", "photos"].forEach(function (k) { if (e[k] !== undefined) site[k] = e[k]; });
+      var q = outbox(); q.push({ site: site, newPhotos: e._new || [] });
+      if (!ls("outbox", q) && outbox().length !== q.length) { S.err = "This phone is out of space - send the waiting sites first."; render(); return; }
+      var shown = Object.assign({ createdAt: e.createdAt || new Date().toISOString(), createdBy: e.createdBy || S.user.name }, site);
+      upsert(shown);
+      S.edit = null; S.err = ""; S.open = site.id; S.view = "detail"; render();
+      toast("Saved - sending…");
+      flush().then(function () { if (!outbox().length) toast("Site sent."); });
+      return;
+    }
+  });
+  function confirmTwice(t) { if (t.getAttribute("data-armed")) return true; t.setAttribute("data-armed", "1"); t.textContent = "Sites are still waiting to go up - tap again to sign out anyway"; return false; }
+  document.addEventListener("input", function (ev) {
+    var t = ev.target;
+    if (t.id === "q") { S.q = t.value; var y = window.scrollY; render(); window.scrollTo(0, y); return; }
+    if (t.getAttribute && t.getAttribute("data-pick")) suggest(t);
+  });
+  document.addEventListener("change", function (ev) {
+    var t = ev.target; if (t.id !== "f_photo" || !t.files || !t.files.length) return;
+    readForm();
+    var files = Array.prototype.slice.call(t.files, 0, 6);
+    Promise.all(files.map(shrink)).then(function (arr) { S.edit._new = (S.edit._new || []).concat(arr); render(); }).catch(function (e) { S.err = e.message; render(); });
+  });
+  window.addEventListener("online", function () { flush(); });
+
+  /* ---------- start ---------- */
+  S.user = ls("user"); S.sites = ls("sites") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
+  render();
+  if (S.user) { flush().then(pull); }
+  if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js"); } catch (e) { } }
+  window.__sk = { S: S, render: render, setApi: function (u) { API = u; } };
+})();
+</script>
+</body>
+</html>
