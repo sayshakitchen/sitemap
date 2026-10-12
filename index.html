@@ -55,7 +55,7 @@ input[type=date]{min-height:44px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "2.1.0";
+  var APP_VERSION = "2.2.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
@@ -282,7 +282,7 @@ input[type=date]{min-height:44px}
     var e = S.edit;
     var stages = (S.stages.length ? S.stages : ls("stages") || []);
     var gps = e.lat && e.lng ? 'Location saved (' + Number(e.lat).toFixed(5) + ', ' + Number(e.lng).toFixed(5) + (e.acc ? ', within ' + Math.round(e.acc) + ' m' : '') + ')' : 'No location yet - stand at the site and tap the button.';
-    var ph = photosOf(e).concat((e._new || []).map(function (b) { return "data:image/jpeg;base64," + b; }));
+    var ph = photosOf(e), nw = e._new || [];   /* 2.2.0 - saved photos and the ones just taken are shown apart */
     return top() + '<div class="wrap"><button class="btn ghost sm" data-a="cancel">‹ Back</button>' +
       '<div class="card"><h2 style="margin:0 0 4px">' + (e.id ? 'Edit site' : 'New site') + '</h2>' +
       field("f_client", "Client name", e.client) +
@@ -295,8 +295,18 @@ input[type=date]{min-height:44px}
       '<label for="f_builder">Builder / PMC</label><input id="f_builder" data-pick="Builder" autocomplete="off" value="' + esc(e.builder || "") + '"><div id="sg_f_builder"></div>' +
       '<label for="f_measure">Measurements</label><textarea id="f_measure" placeholder="Kitchen size, walls, heights…">' + esc(e.measure || "") + '</textarea>' +
       '<label for="f_notes">Notes</label><textarea id="f_notes">' + esc(e.notes || "") + '</textarea>' +
-      '<label>Photos</label>' + (ph.length ? '<div class="thumbs">' + ph.map(function (u) { return '<img src="' + esc(u) + '" alt="">'; }).join("") + '</div>' : '<div class="meta">No photos yet.</div>') +
-      '<label class="btn sm dk" style="display:inline-flex;align-items:center;margin-top:6px;color:#fff">+ Add photo<input id="f_photo" type="file" accept="image/*" capture="environment" multiple style="display:none"></label>' +
+      /* 2.2.0 - HIS WORDS: "clicking will open mobile camera to take pic, multiple pics can be taken". The camera
+         button opens the phone camera straight away (one picture per tap - a phone camera opened from a page takes
+         one at a time); every tap adds another. The gallery button picks many at once. Pictures just taken show
+         with a remove cross until Save. */
+      '<label>Photos</label>' + (ph.length ? '<div class="thumbs">' + ph.map(function (u) { return '<img src="' + esc(u) + '" alt="">'; }).join("") + '</div>' : '') +
+      (nw.length ? '<div class="meta" style="margin-top:4px"><b>' + nw.length + ' new photo' + (nw.length === 1 ? '' : 's') + '</b> - they go up when you press Save site.</div>' +
+        '<div class="thumbs">' + nw.map(function (b, k) { return '<span style="position:relative;display:inline-block"><img src="data:image/jpeg;base64,' + b + '" alt="New photo ' + (k + 1) + '">' +
+          '<button type="button" data-a="delnew" data-k="' + k + '" aria-label="Remove this photo" style="position:absolute;top:-6px;right:-6px;width:44px;height:44px;border-radius:22px;border:0;background:rgba(17,24,39,.75);color:#fff;font-size:18px;line-height:44px;padding:0">&times;</button></span>'; }).join("") + '</div>' : '') +
+      (!ph.length && !nw.length ? '<div class="meta">No photos yet.</div>' : '') +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' +
+      '<label class="btn sm dk" style="display:inline-flex;align-items:center;min-height:44px;color:#fff">' + (nw.length ? 'Take another photo' : 'Take photo') + '<input id="f_photo" type="file" accept="image/*" capture="environment" style="display:none"></label>' +
+      '<label class="btn sm ghost" style="display:inline-flex;align-items:center;min-height:44px">Choose from gallery<input id="f_photo_g" type="file" accept="image/*" multiple style="display:none"></label></div>' +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       '<div style="margin-top:14px"><button class="btn" data-a="save" style="width:100%">Save site</button></div></div></div>';
   }
@@ -613,6 +623,7 @@ input[type=date]{min-height:44px}
     if (a === "signout") { if (outbox().length && !confirmTwice(t)) return; signOut(); return; }
     if (a === "open") { S.open = t.getAttribute("data-id"); S.view = "detail"; render(); window.scrollTo(0, 0); return; }
     if (a === "back") { S.view = "list"; S.err = ""; render(); return; }
+    if (a === "delnew" && S.edit) { readForm(); var dk = Number(t.getAttribute("data-k")); S.edit._new = (S.edit._new || []).filter(function (x, i) { return i !== dk; }); render(); return; }   /* 2.2.0 */
     if (a === "new") { S.edit = { city: "Panipat", _new: [] }; S.err = ""; S.view = "form"; render(); window.scrollTo(0, 0); return; }
     if (a === "edit") { var s = S.sites.filter(function (x) { return x.id === t.getAttribute("data-id"); })[0]; S.edit = Object.assign({}, s, { _new: [] }); S.err = ""; S.view = "form"; render(); return; }
     if (a === "cancel") { S.view = S.edit && S.edit.id ? "detail" : "list"; S.edit = null; S.err = ""; render(); return; }
@@ -658,9 +669,9 @@ input[type=date]{min-height:44px}
     if (t.id === "f_mobile" && S.edit) { S.edit.mobile = t.value; var db = document.getElementById("dupbox"); if (db) db.innerHTML = dupBox(S.edit); }
   });
   document.addEventListener("change", function (ev) {
-    var t = ev.target; if (t.id !== "f_photo" || !t.files || !t.files.length) return;
+    var t = ev.target; if ((t.id !== "f_photo" && t.id !== "f_photo_g") || !t.files || !t.files.length) return;
     readForm();
-    var files = Array.prototype.slice.call(t.files, 0, 6);
+    var files = Array.prototype.slice.call(t.files, 0, 12);   /* 2.2.0 - up to 12 from the gallery at a time */
     Promise.all(files.map(shrink)).then(function (arr) { S.edit._new = (S.edit._new || []).concat(arr); render(); }).catch(function (e) { S.err = e.message; render(); });
   });
   window.addEventListener("online", function () { flush(); });
