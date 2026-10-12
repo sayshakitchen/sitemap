@@ -42,6 +42,8 @@ textarea{min-height:90px}
 .empty{text-align:center;color:var(--muted);padding:30px 10px}
 .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:14px}.kv div:nth-child(odd){color:var(--muted)}
 .note.warn{background:#FFF4DE;border-color:#E9C27A}
+.pill.ok{background:#DDF1E3;color:#1F5A30}
+input[type=date]{min-height:44px}
 .pill.warn{background:#FCEBC8;color:#7A5410}
 .sugg{border:1px solid var(--line);border-radius:10px;margin-top:4px;max-height:220px;overflow:auto;background:#fff}
 .sugg button{display:block;width:100%;text-align:left;min-height:44px;padding:8px 10px;border:0;border-bottom:1px solid var(--line);background:#fff;font-size:15px;color:var(--ink)}
@@ -53,15 +55,15 @@ textarea{min-height:90px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "2.0.0";
+  var APP_VERSION = "2.1.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
-  var S = { user: null, sites: [], visits: [], partners: [], stages: [], view: "list", q: "", filter: "all", here: null, edit: null, vis: null, busy: false, err: "", open: null, sugg: null };
+  var S = { user: null, sites: [], visits: [], showroom: [], tab: "sites", srq: "", partners: [], stages: [], view: "list", q: "", filter: "all", here: null, edit: null, vis: null, busy: false, err: "", open: null, sugg: null };
 
   function ls(k, v) { try { if (v === undefined) { var x = localStorage.getItem(K + k); return x ? JSON.parse(x) : null; } if (v === null) localStorage.removeItem(K + k); else localStorage.setItem(K + k, JSON.stringify(v)); } catch (e) { return null; } }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function toast(t) { var d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(function () { d.remove(); }, 3200); }
+  function toast(t) { Array.prototype.forEach.call(document.querySelectorAll(".toast"), function (x) { x.remove(); }); var d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(function () { d.remove(); }, 3200); }
   function dmy(iso) { var d = new Date(iso); if (isNaN(d)) return ""; return String(d.getDate()).padStart(2, "0") + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + d.getFullYear(); }
   function photosOf(s) { try { var a = JSON.parse(s.photos || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 
@@ -92,6 +94,19 @@ textarea{min-height:90px}
         function () { bad(new Error("Location not found - turn on location and try again.")); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
     });
   }
+  /* ---------- 2.1.0 - THE SHOWROOM ---------- */
+  var WHO = ["Client alone", "Client + Architect", "Architect alone", "Client + Builder", "Builder alone", "Client + Architect + Builder", "Other"];
+  var OUTCOMES = ["Just looking", "Design discussed", "Measurement booked", "Quotation to send", "Quotation given", "Order confirmed", "Not interested"];
+  var INTEREST = ["Modular kitchen", "Wardrobe", "Vanity", "TV unit", "Full home interior", "Appliances", "Other"];
+  var OPEN_OUT = { "Design discussed": 1, "Measurement booked": 1, "Quotation to send": 1, "Quotation given": 1, "Just looking": 1 };
+  function today() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function plusDays(n) { var d = new Date(Date.now() + n * 86400000); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function ymd(v) { var t = String(v || ""); if (/^\d\d\d\d-\d\d-\d\d/.test(t) && t.length === 10) return t; var d = new Date(t); return isNaN(d) ? "" : d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function dmyD(v) { var t = ymd(v); return t ? t.slice(8, 10) + "-" + t.slice(5, 7) + "-" + t.slice(0, 4) : ""; }
+  function srByMobile(m) { m = mob10(m); return m.length === 10 ? (S.showroom || []).filter(function (r) { return mob10(r.mobile) === m; }) : []; }
+  function srForSite(s) { var m = mob10(s.mobile); return (S.showroom || []).filter(function (r) { return r.siteId === s.id || (m.length === 10 && mob10(r.mobile) === m); }); }
+  function srByArch(a) { a = String(a || "").trim().toLowerCase(); return a ? (S.showroom || []).filter(function (r) { return String(r.architect || "").trim().toLowerCase() === a; }) : []; }
+  function hasC(w) { return /client/i.test(w || ""); } function hasA(w) { return /architect/i.test(w || ""); } function hasB(w) { return /builder/i.test(w || ""); }
   function canMap() { return S.user && (S.user.role === "mapper" || S.user.role === "admin"); }
   /* 1.2.0 - everyone adds sites; a site is edited by whoever entered it, or the mapper / owner */
   function canEdit(s) { return canMap() || (S.user && s && String(s.createdBy || "").toLowerCase() === String(S.user.name).toLowerCase()); }
@@ -102,6 +117,18 @@ textarea{min-height:90px}
     var q = outbox(); if (!q.length || S.flushing) return Promise.resolve();
     S.flushing = true;
     var job = q[0];
+    if (job.sr) {   /* 2.1.0 - a showroom visit waiting to go up */
+      return call("showroom", { sv: job.sr }).then(function (r) {
+        if (!r.ok) throw new Error(r.error || "Showroom visit not saved");
+        var qq = outbox(); qq.shift(); ls("outbox", qq);
+        var i = S.showroom.findIndex(function (x) { return x.id === r.row.id; }); if (i >= 0) S.showroom[i] = r.row; else S.showroom.unshift(r.row); ls("showroom", S.showroom);
+        S.flushing = false; render(); return flush();
+      }).catch(function (e) {
+        S.flushing = false; var m = String(e && e.message || e);
+        if (/who came|give the|needs 10/i.test(m)) { var qq = outbox(); qq.shift(); ls("outbox", qq); S.err = "Showroom visit not saved: " + m; }
+        render();
+      });
+    }
     if (job.visit) {   /* 2.0.0 - a visit waiting to go up */
       return call("visit", { visit: job.visit }).then(function (r) {
         if (!r.ok) throw new Error(r.error || "Visit not saved");
@@ -158,12 +185,12 @@ textarea{min-height:90px}
       S.busy = false;
       if (!r.ok && r.mustChange) { S.user.mustChange = true; ls("user", S.user); S.view = "pin"; render(); return; }   /* 1.1.0 */
       if (!r.ok) { if (/wrong name|pin/i.test(r.error || "")) { signOut(); } S.err = r.error || "Could not load"; render(); return; }
-      S.sites = r.sites || []; S.visits = r.visits || []; S.stages = r.stages || S.stages; S.partners = r.partners || [];
+      S.sites = r.sites || []; S.visits = r.visits || []; S.showroom = r.showroom || []; ls("showroom", S.showroom); S.stages = r.stages || S.stages; S.partners = r.partners || [];
       ls("sites", S.sites); ls("visits", S.visits); ls("stages", S.stages); if (canMap()) ls("partners", S.partners); else ls("partners", null);
       S.err = ""; ls("pulledAt", Date.now()); render();
     }).catch(function () { S.busy = false; S.err = "No signal - showing what this phone already has."; render(); });
   }
-  function signOut() { ["user", "sites", "visits", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
+  function signOut() { ["user", "sites", "visits", "showroom", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
 
   /* ---------- screens ---------- */
   function top() {
@@ -188,7 +215,7 @@ textarea{min-height:90px}
     var nMiss = S.sites.filter(function (s) { return missing(s).length; }).length;
     var chip = function (k, lab) { return '<button class="btn sm ' + (S.filter === k ? '' : 'ghost') + '" data-a="filter" data-k="' + k + '">' + lab + '</button>'; };
     var ob = outbox().length;
-    var h = top() + '<div class="wrap">' +
+    var h = top() + '<div class="wrap">' + tabs() +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       (ob ? '<div class="note">' + ob + ' site' + (ob > 1 ? 's' : '') + ' waiting to go up - they go as soon as there is signal. <button class="btn sm" data-a="flush">Send now</button></div>' : '') +
       installBar() +
@@ -244,6 +271,10 @@ textarea{min-height:90px}
         return '<div class="card"><h3 style="margin:0 0 6px">Visits (' + vs.length + ')</h3>' + (vs.length ? vs.map(function (v) {
           return '<div style="border-top:1px solid var(--line);padding:8px 0"><b>' + esc(dmy(v.at)) + '</b> · ' + esc(v.by) + (v.stage ? ' · <span class="pill">' + esc(v.stage) + '</span>' : '') + (v.note ? '<div style="white-space:pre-wrap">' + esc(v.note) + '</div>' : '') + '</div>';
         }).join("") : '<div class="meta">No visits marked yet. Tap Mark visit when you are at the site.</div>') + '</div>';
+      })() + (function () {
+        var rs = srForSite(s).sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+        if (!rs.length) return '';
+        return '<div class="card"><h3 style="margin:0 0 6px">Showroom visits (' + rs.length + ')</h3>' + rs.map(srLine).join("") + '</div>';
       })() + '</div>';
   }
   function field(id, lab, v, extra) { return '<label for="' + id + '">' + lab + '</label><input id="' + id + '" value="' + esc(v || "") + '"' + (extra || "") + '>'; }
@@ -268,6 +299,89 @@ textarea{min-height:90px}
       '<label class="btn sm dk" style="display:inline-flex;align-items:center;margin-top:6px;color:#fff">+ Add photo<input id="f_photo" type="file" accept="image/*" capture="environment" multiple style="display:none"></label>' +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       '<div style="margin-top:14px"><button class="btn" data-a="save" style="width:100%">Save site</button></div></div></div>';
+  }
+  function tabs() {
+    var t = function (k, lab) { return '<button class="btn sm ' + (S.tab === k ? '' : 'ghost') + '" data-a="tab" data-k="' + k + '" style="flex:1">' + lab + '</button>'; };
+    return '<div style="display:flex;gap:8px;margin-bottom:10px">' + t("sites", "Sites") + t("showroom", "Showroom") + '</div>';
+  }
+  function srLine(r) {
+    return '<div class="srrow" data-a="sropen" data-id="' + esc(r.id) + '" style="border-top:1px solid var(--line);padding:8px 0;cursor:pointer"><b>' + esc(dmyD(r.at)) + '</b> · <span class="pill">' + esc(r.who) + '</span>' +
+      (r.outcome ? '<span class="pill ' + (r.outcome === "Order confirmed" ? 'ok' : r.outcome === "Not interested" ? '' : 'warn') + '">' + esc(r.outcome) + '</span>' : '') +
+      '<div>' + esc([r.client, r.architect ? "Arch: " + r.architect : "", r.builder ? "Builder: " + r.builder : ""].filter(Boolean).join(" · ")) + '</div>' +
+      '<div class="meta">' + (r.interest ? esc(r.interest) + ' · ' : '') + 'attended by ' + esc(r.by || "") + (r.nextDate ? ' · follow up ' + esc(dmyD(r.nextDate)) : '') + '</div>' +
+      (r.note ? '<div class="meta" style="white-space:pre-wrap">' + esc(r.note) + '</div>' : '') + '</div>';
+  }
+  /* the showroom: this month at a glance, who to call back, every visit */
+  function showroomHome() {
+    var all = (S.showroom || []).slice().sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+    var ym = today().slice(0, 7), mon = all.filter(function (r) { return ymd(r.at).slice(0, 7) === ym; });
+    var cnt = function (f) { return mon.filter(f).length; };
+    var ord = cnt(function (r) { return r.outcome === "Order confirmed"; });
+    /* the latest visit per client (by mobile, else name) decides whether he still needs a call */
+    var last = {}; all.forEach(function (r) { var k = mob10(r.mobile) || ("n:" + String(r.client || r.architect).toLowerCase()); if (!last[k]) last[k] = r; });
+    var due = Object.keys(last).map(function (k) { return last[k]; }).filter(function (r) { return r.nextDate && ymd(r.nextDate) <= today() && OPEN_OUT[r.outcome]; }).sort(function (a, b) { return ymd(a.nextDate).localeCompare(ymd(b.nextDate)); });
+    var arch = {}; all.forEach(function (r) { var a = String(r.architect || "").trim(); if (!a) return; var o = arch[a.toLowerCase()] || (arch[a.toLowerCase()] = { n: a, v: 0, withC: 0, orders: 0 }); o.v++; if (hasC(r.who)) o.withC++; if (r.outcome === "Order confirmed") o.orders++; });
+    var topA = Object.keys(arch).map(function (k) { return arch[k]; }).sort(function (a, b) { return b.withC - a.withC || b.v - a.v; }).slice(0, 5);
+    var q = S.srq.trim().toLowerCase();
+    var rows = all.filter(function (r) { return !q || [r.client, r.mobile, r.architect, r.builder, r.outcome, r.interest, r.who].join(" ").toLowerCase().indexOf(q) >= 0; });
+    var tile = function (n, lab) { return '<div style="flex:1 1 90px;border:1px solid var(--line);border-radius:10px;padding:8px"><div style="font-size:20px;font-weight:700">' + n + '</div><div class="meta">' + lab + '</div></div>'; };
+    return top() + '<div class="wrap">' + tabs() +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      '<div class="card"><h3 style="margin:0 0 8px">This month</h3><div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      tile(mon.length, "showroom visits") + tile(cnt(function (r) { return r.who === "Client alone"; }), "client alone") + tile(cnt(function (r) { return hasC(r.who) && hasA(r.who); }), "client with architect") +
+      tile(cnt(function (r) { return r.who === "Architect alone"; }), "architect alone") + tile(ord, "orders confirmed") + '</div></div>' +
+      (due.length ? '<div class="card"><h3 style="margin:0 0 6px">Call back today (' + due.length + ')</h3>' + due.map(function (r) {
+        var m = mob10(r.mobile);
+        return '<div style="border-top:1px solid var(--line);padding:8px 0"><b>' + esc(r.client || r.architect) + '</b> <span class="meta">· ' + esc(r.outcome) + ' · was due ' + esc(dmyD(r.nextDate)) + ' · ' + srByMobile(m).length + ' visit(s)</span>' +
+          '<div class="acts">' + (m ? '<a class="btn sm" href="tel:' + m + '">Call</a><a class="btn sm dk" href="https://wa.me/91' + m + '" target="_blank" rel="noopener">WhatsApp</a>' : '') + '<button class="btn sm ghost" data-a="sropen" data-id="' + esc(r.id) + '">Update</button><button class="btn sm ghost" data-a="srnew" data-from="' + esc(r.id) + '">Came again</button></div></div>';
+      }).join("") + '</div>' : '') +
+      (topA.length ? '<div class="card"><h3 style="margin:0 0 6px">Architects bringing clients</h3>' + topA.map(function (o) { return '<div style="border-top:1px solid var(--line);padding:6px 0">' + esc(o.n) + ' <span class="meta">· ' + o.withC + ' with clients · ' + o.v + ' visits in all' + (o.orders ? ' · ' + o.orders + ' orders' : '') + '</span></div>'; }).join("") + '</div>' : '') +
+      '<input id="srq" placeholder="Search client, mobile, architect, outcome…" value="' + esc(S.srq) + '">' +
+      '<div class="card">' + (rows.length ? '<h3 style="margin:0 0 6px">All showroom visits (' + rows.length + ')</h3>' + rows.slice(0, 200).map(srLine).join("") : '<div class="meta">No showroom visits yet. Tap "+ Showroom visit" when someone comes in.</div>') + '</div>' +
+      '<div style="text-align:center"><div class="meta" style="margin-top:6px">Version ' + APP_VERSION + '</div></div></div>' +
+      '<button class="btn fab" data-a="srnew">+ Showroom visit</button>';
+  }
+  function chips(name, list, sel, multi) {
+    var on = multi ? String(sel || "").split(", ").filter(Boolean) : [sel];
+    return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">' + list.map(function (x) {
+      return '<button type="button" class="btn sm ' + (on.indexOf(x) >= 0 ? '' : 'ghost') + '" data-a="chip" data-n="' + name + '" data-v="' + esc(x) + '"' + (multi ? ' data-m="1"' : '') + '>' + esc(x) + '</button>';
+    }).join("") + '</div>';
+  }
+  function srHints(r) {
+    var h = "", m = mob10(r.mobile);
+    if (m.length === 10) {
+      var site = S.sites.filter(function (x) { return mob10(x.mobile) === m; })[0];
+      var before = srByMobile(m).filter(function (x) { return x.id !== r.id; }).sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
+      if (site) h += '<div class="note" style="margin-top:8px"><b>On the site list:</b> ' + esc(site.client) + ' - ' + esc([site.address, site.area].filter(Boolean).join(", ")) + ' · ' + visitsOf(site.id).length + ' site visits' + (site.architect ? ' · Arch: ' + esc(site.architect) : '') + '</div>';
+      if (before.length) h += '<div class="note warn" style="margin-top:8px"><b>Came before: ' + before.length + ' time' + (before.length > 1 ? 's' : '') + '</b>, last ' + esc(dmyD(before[0].at)) + (before[0].outcome ? ' (' + esc(before[0].outcome) + ')' : '') + (before[0].architect ? ' with ' + esc(before[0].architect) : '') + '</div>';
+      if (!site && !r.id0) h += '<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;color:var(--ink)"><input type="checkbox" id="sr_lead" style="width:24px;min-height:24px"' + (r.addLead !== false ? ' checked' : '') + '> Also add to the site list as a new lead</label>';
+    }
+    return h;
+  }
+  function srArchHint(r) {
+    var a = srByArch(r.architect).filter(function (x) { return x.id !== r.id; });
+    return a.length ? '<div class="meta" style="margin-top:4px">' + esc(r.architect) + ' has come to the showroom ' + a.length + ' time' + (a.length > 1 ? 's' : '') + ' before (' + a.filter(function (x) { return hasC(x.who); }).length + ' with clients).</div>' : '';
+  }
+  function srForm() {
+    var r = S.sr, w = r.who || "";
+    return top() + '<div class="wrap"><button class="btn ghost sm" data-a="srcancel">‹ Showroom</button>' +
+      '<div class="card"><h2 style="margin:0 0 4px">' + (r.id0 ? 'Showroom visit' : 'New showroom visit') + '</h2>' + (r.id0 ? '<div class="meta">' + esc(dmyD(r.at)) + ' · attended by ' + esc(r.by || "") + '</div>' : '') +
+      '<label>Who came</label>' + chips("who", WHO, w) +
+      (hasC(w) || w === "Other" ? field("sr_client", "Client name", r.client) + field("sr_mobile", "Client mobile (10 digits)", r.mobile, ' inputmode="tel"') + '<div id="srhint">' + srHints(r) + '</div>' : '') +
+      (w ? '<label for="f_architect">' + (hasA(w) ? 'Architect' : 'Architect (if the client has one)') + '</label><input id="f_architect" data-pick="Architect" autocomplete="off" value="' + esc(r.architect || "") + '"><div id="sg_f_architect"></div><div id="srarch">' + srArchHint(r) + '</div>' : '') +
+      (hasB(w) ? '<label for="f_builder">Builder / PMC</label><input id="f_builder" data-pick="Builder" autocomplete="off" value="' + esc(r.builder || "") + '"><div id="sg_f_builder"></div>' : '') +
+      (w ? '<label>Interested in</label>' + chips("interest", INTEREST, r.interest, true) +
+        '<label for="sr_outcome">Outcome</label><select id="sr_outcome"><option value=""></option>' + OUTCOMES.map(function (x) { return '<option' + (x === r.outcome ? ' selected' : '') + '>' + x + '</option>'; }).join("") + '</select>' +
+        '<label for="sr_next">Next follow-up</label><input id="sr_next" type="date" value="' + esc(ymd(r.nextDate)) + '">' +
+        '<label for="sr_note">Note</label><textarea id="sr_note" placeholder="What they liked, budget, timeline…">' + esc(r.note || "") + '</textarea>' : '<div class="meta" style="margin-top:8px">Choose who came first.</div>') +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      (w ? '<div style="margin-top:14px"><button class="btn" data-a="srsave" style="width:100%">Save showroom visit</button></div>' : '') + '</div></div>';
+  }
+  function readSr() {
+    var r = S.sr, g = function (id) { var x = document.getElementById(id); return x ? x.value.trim() : undefined; };
+    var map = { sr_client: "client", sr_mobile: "mobile", f_architect: "architect", f_builder: "builder", sr_outcome: "outcome", sr_next: "nextDate", sr_note: "note" };
+    Object.keys(map).forEach(function (id) { var v = g(id); if (v !== undefined) r[map[id]] = v; });
+    var lc = document.getElementById("sr_lead"); if (lc) r.addLead = lc.checked;
   }
   /* 2.0.0 - the same client already mapped (same mobile): open it, or say it is a different site */
   function dupBox(e) {
@@ -348,6 +462,8 @@ textarea{min-height:90px}
     else if (S.view === "form") app.innerHTML = form();
     else if (S.view === "visit" && S.vis) app.innerHTML = visitScreen();
     else if (S.view === "detail") app.innerHTML = detail();
+    else if (S.view === "srform" && S.sr) app.innerHTML = srForm();
+    else if (S.tab === "showroom") app.innerHTML = showroomHome();
     else app.innerHTML = list();
     if (keep === "q") { var q = document.getElementById("q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
   }
@@ -428,6 +544,42 @@ textarea{min-height:90px}
       return;
     }
     if (a === "flush") { flush(); return; }
+    if (a === "tab") { S.tab = t.getAttribute("data-k"); S.view = "list"; S.err = ""; render(); window.scrollTo(0, 0); return; }
+    if (a === "srnew") {
+      var from = t.getAttribute("data-from"), p0 = from ? S.showroom.filter(function (x) { return x.id === from; })[0] : null;
+      S.sr = { id: "SR-" + Date.now() + "-" + Math.floor(Math.random() * 900 + 100), at: new Date().toISOString(), by: S.user.name };
+      if (p0) ["who", "client", "mobile", "siteId", "architect", "builder", "interest"].forEach(function (k) { S.sr[k] = p0[k]; });
+      S.err = ""; S.view = "srform"; render(); window.scrollTo(0, 0); return;
+    }
+    if (a === "sropen") { var r0 = S.showroom.filter(function (x) { return x.id === t.getAttribute("data-id"); })[0]; if (!r0) return; S.sr = Object.assign({ id0: true }, r0); S.err = ""; S.tab = "showroom"; S.view = "srform"; render(); window.scrollTo(0, 0); return; }
+    if (a === "srcancel") { S.sr = null; S.view = "list"; S.tab = "showroom"; S.err = ""; render(); return; }
+    if (a === "chip") {
+      readSr(); var n = t.getAttribute("data-n"), v = t.getAttribute("data-v");
+      if (t.getAttribute("data-m")) { var cur = String(S.sr[n] || "").split(", ").filter(Boolean); var ix = cur.indexOf(v); if (ix >= 0) cur.splice(ix, 1); else cur.push(v); S.sr[n] = cur.join(", "); }
+      else S.sr[n] = v;
+      render(); return;
+    }
+    if (a === "srsave") {
+      readSr(); var r = S.sr, w = r.who || "";
+      var m = mob10(r.mobile);
+      if (!w) { S.err = "Choose who came."; render(); return; }
+      if (!r.client && !r.architect && !r.builder) { S.err = hasC(w) ? "Give the client's name." : "Give the architect's or builder's name."; render(); return; }
+      if (r.mobile && m.length !== 10) { S.err = "The mobile number needs 10 digits."; render(); return; }
+      if (!hasC(w) && w !== "Other") { r.client = ""; r.mobile = ""; }
+      if (OPEN_OUT[r.outcome] && r.outcome !== "Just looking" && !r.nextDate) { S.err = "Give a follow-up date for '" + r.outcome + "'."; render(); return; }
+      var site = m.length === 10 ? S.sites.filter(function (x) { return mob10(x.mobile) === m; })[0] : null;
+      var q = outbox();
+      if (!site && m.length === 10 && r.addLead !== false && !r.id0) {   /* also a new lead on the site list */
+        var ns = { id: "SK-" + Date.now() + "-" + Math.floor(Math.random() * 900 + 100), client: r.client, mobile: m, city: "Panipat", architect: r.architect || "", builder: r.builder || "", notes: "Came to the showroom on " + dmyD(r.at) + (r.interest ? " - interested in " + r.interest : "") };
+        q.push({ site: ns, newPhotos: [] }); upsert(Object.assign({ createdAt: new Date().toISOString(), createdBy: S.user.name }, ns)); site = ns;
+      }
+      var rec = { id: r.id, at: r.at, who: w, client: r.client || "", mobile: m, siteId: site ? site.id : (r.siteId || ""), architect: r.architect || "", builder: r.builder || "", interest: r.interest || "", outcome: r.outcome || "", nextDate: r.nextDate || "", note: r.note || "" };
+      q.push({ sr: rec }); ls("outbox", q);
+      var row = Object.assign({ by: r.by || S.user.name }, rec), i = S.showroom.findIndex(function (x) { return x.id === rec.id; }); if (i >= 0) S.showroom[i] = Object.assign(S.showroom[i], row); else S.showroom.unshift(row); ls("showroom", S.showroom);
+      S.sr = null; S.view = "list"; S.tab = "showroom"; S.err = ""; render(); window.scrollTo(0, 0);
+      toast("Showroom visit saved - sending…"); flush().then(function () { if (!outbox().length) toast("Sent."); });
+      return;
+    }
     if (a === "filter") {
       S.filter = t.getAttribute("data-k"); S.locErr = "";
       if (S.filter === "near") { S.here = null; locate().then(function (p) { S.here = p; render(); }).catch(function (e) { S.locErr = e.message; render(); }); }
@@ -500,6 +652,9 @@ textarea{min-height:90px}
     var t = ev.target;
     if (t.id === "q") { S.q = t.value; var y = window.scrollY; render(); window.scrollTo(0, y); return; }
     if (t.getAttribute && t.getAttribute("data-pick")) suggest(t);
+    if (t.id === "srq") { S.srq = t.value; var y2 = window.scrollY; render(); window.scrollTo(0, y2); var e2 = document.getElementById("srq"); if (e2) { e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); } return; }
+    if (t.id === "sr_mobile" && S.sr) { S.sr.mobile = t.value; var sh2 = document.getElementById("srhint"); if (sh2) sh2.innerHTML = srHints(S.sr); }
+    if (t.id === "f_architect" && S.sr && S.view === "srform") { S.sr.architect = t.value; var ah = document.getElementById("srarch"); if (ah) ah.innerHTML = srArchHint(S.sr); }
     if (t.id === "f_mobile" && S.edit) { S.edit.mobile = t.value; var db = document.getElementById("dupbox"); if (db) db.innerHTML = dupBox(S.edit); }
   });
   document.addEventListener("change", function (ev) {
@@ -511,7 +666,7 @@ textarea{min-height:90px}
   window.addEventListener("online", function () { flush(); });
 
   /* ---------- start ---------- */
-  S.user = ls("user"); S.sites = ls("sites") || []; S.visits = ls("visits") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
+  S.user = ls("user"); S.sites = ls("sites") || []; S.visits = ls("visits") || []; S.showroom = ls("showroom") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
   render();
   if (S.user) { flush().then(pull); }
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js"); } catch (e) { } }
