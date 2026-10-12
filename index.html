@@ -51,7 +51,7 @@ textarea{min-height:90px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.2.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
@@ -70,6 +70,8 @@ textarea{min-height:90px}
       .then(function (r) { return r.json(); });
   }
   function canMap() { return S.user && (S.user.role === "mapper" || S.user.role === "admin"); }
+  /* 1.2.0 - everyone adds sites; a site is edited by whoever entered it, or the mapper / owner */
+  function canEdit(s) { return canMap() || (S.user && s && String(s.createdBy || "").toLowerCase() === String(S.user.name).toLowerCase()); }
 
   /* ---------- the outbox: a save made with no signal waits here and goes when the line is back ---------- */
   function outbox() { return ls("outbox") || []; }
@@ -145,7 +147,7 @@ textarea{min-height:90px}
       (ob ? '<div class="note">' + ob + ' site' + (ob > 1 ? 's' : '') + ' waiting to go up - they go as soon as there is signal. <button class="btn sm" data-a="flush">Send now</button></div>' : '') +
       '<input id="q" placeholder="Search name, mobile, area, architect…" value="' + esc(S.q) + '">' +
       '<div class="meta" style="margin:8px 2px">' + rows.length + ' of ' + S.sites.length + ' sites</div>';
-    if (!rows.length) h += '<div class="empty">' + (S.sites.length ? 'Nothing matches.' : (canMap() ? 'No sites yet. Tap "+ New site" to add the first one.' : 'No sites yet.')) + '</div>';
+    if (!rows.length) h += '<div class="empty">' + (S.sites.length ? 'Nothing matches.' : ('No sites yet. Tap "+ New site" to add the first one.')) + '</div>';
     h += rows.slice(0, 300).map(function (s) {
       var ph = photosOf(s);
       return '<div class="card site" data-a="open" data-id="' + esc(s.id) + '">' +
@@ -158,7 +160,7 @@ textarea{min-height:90px}
     h += '<div style="text-align:center;margin-top:20px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
       (S.user.role === "admin" ? '<button class="btn ghost sm" data-a="people">People</button>' : '') +
       '<button class="btn ghost sm" data-a="chpin">Change PIN</button><button class="btn ghost sm" data-a="signout">Sign out</button></div><div style="text-align:center"><div class="meta" style="margin-top:6px">Version ' + APP_VERSION + '</div></div></div>';
-    if (canMap()) h += '<button class="btn fab" data-a="new">+ New site</button>';
+    h += '<button class="btn fab" data-a="new">+ New site</button>';
     return h;
   }
   function mapLink(s) { return s.lat && s.lng ? "https://www.google.com/maps/search/?api=1&query=" + s.lat + "," + s.lng : (s.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([s.address, s.area, s.city].filter(Boolean).join(", ")) : ""); }
@@ -183,7 +185,7 @@ textarea{min-height:90px}
       '<div class="acts">' +
       (mob ? '<a class="btn sm" href="tel:' + esc(mob) + '">Call</a><a class="btn sm dk" href="https://wa.me/91' + esc(mob) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
       (ml ? '<a class="btn sm dk" href="' + esc(ml) + '" target="_blank" rel="noopener">Open in Maps</a>' : '') +
-      (canMap() ? '<button class="btn sm ghost" data-a="edit" data-id="' + esc(s.id) + '">Edit</button>' : '') +
+      (canEdit(s) ? '<button class="btn sm ghost" data-a="edit" data-id="' + esc(s.id) + '">Edit</button>' : '') +
       '</div></div></div>';
   }
   function field(id, lab, v, extra) { return '<label for="' + id + '">' + lab + '</label><input id="' + id + '" value="' + esc(v || "") + '"' + (extra || "") + '>'; }
@@ -379,6 +381,20 @@ textarea{min-height:90px}
   render();
   if (S.user) { flush().then(pull); }
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js"); } catch (e) { } }
+  /* 1.1.1 - a phone that opened an older version moves to the new one by itself (12 Oct: the owner's
+     browser was still on 1.0.1, which has no "choose your own PIN" screen). Checked on open, when the
+     app comes back to the front, and every 30 minutes; never while a site is half-typed or waiting to go up. */
+  function newer(a, b) { var x = String(a).split("."), y = String(b).split("."); for (var i = 0; i < 3; i++) { var d = (Number(x[i]) || 0) - (Number(y[i]) || 0); if (d) return d > 0; } return false; }
+  function checkVersion() {
+    fetch("index.html?v=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) {
+      var m = String(t).match(/var APP_VERSION = "([0-9.]+)"/);
+      if (!m || !newer(m[1], APP_VERSION)) return;
+      if (S.view === "form" || outbox().length) return;
+      location.replace("./?u=" + Date.now());
+    }).catch(function () { });
+  }
+  setTimeout(checkVersion, 2000); setInterval(checkVersion, 30 * 60000);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") checkVersion(); });
   window.__sk = { S: S, render: render, setApi: function (u) { API = u; } };
 })();
 </script>
