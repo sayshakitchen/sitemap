@@ -41,6 +41,8 @@ textarea{min-height:90px}
 .toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;max-width:90vw}
 .empty{text-align:center;color:var(--muted);padding:30px 10px}
 .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:14px}.kv div:nth-child(odd){color:var(--muted)}
+.note.warn{background:#FFF4DE;border-color:#E9C27A}
+.pill.warn{background:#FCEBC8;color:#7A5410}
 .sugg{border:1px solid var(--line);border-radius:10px;margin-top:4px;max-height:220px;overflow:auto;background:#fff}
 .sugg button{display:block;width:100%;text-align:left;min-height:44px;padding:8px 10px;border:0;border-bottom:1px solid var(--line);background:#fff;font-size:15px;color:var(--ink)}
 .sugg button small{color:var(--muted);font-size:12px}
@@ -51,11 +53,11 @@ textarea{min-height:90px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "1.2.0";
+  var APP_VERSION = "2.0.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
-  var S = { user: null, sites: [], partners: [], stages: [], view: "list", q: "", edit: null, busy: false, err: "", open: null, sugg: null };
+  var S = { user: null, sites: [], visits: [], partners: [], stages: [], view: "list", q: "", filter: "all", here: null, edit: null, vis: null, busy: false, err: "", open: null, sugg: null };
 
   function ls(k, v) { try { if (v === undefined) { var x = localStorage.getItem(K + k); return x ? JSON.parse(x) : null; } if (v === null) localStorage.removeItem(K + k); else localStorage.setItem(K + k, JSON.stringify(v)); } catch (e) { return null; } }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -69,6 +71,27 @@ textarea{min-height:90px}
     return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(b) })
       .then(function (r) { return r.json(); });
   }
+  /* 2.0.0 - distance in metres between two points */
+  function dist(a, b) {
+    if (!a || !b || !a.lat || !a.lng || !b.lat || !b.lng) return null;
+    var R = 6371000, r = Math.PI / 180, dLa = (b.lat - a.lat) * r, dLo = (b.lng - a.lng) * r;
+    var x = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return Math.round(2 * R * Math.asin(Math.sqrt(x)));
+  }
+  function mtr(m) { return m == null ? "" : m < 1000 ? m + " m" : (m / 1000).toFixed(1) + " km"; }
+  function mob10(x) { return String(x || "").replace(/\D/g, "").slice(-10); }
+  function visitsOf(id) { return (S.visits || []).filter(function (v) { return v.siteId === id; }).sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); }); }
+  function missing(s) { var m = []; if (!String(s.architect || "").trim()) m.push("architect"); if (!String(s.builder || "").trim()) m.push("builder"); return m; }
+  /* the same client already on the list (by mobile), other than this one */
+  function dupOf(e) { var m = mob10(e.mobile); if (m.length !== 10) return null; return S.sites.filter(function (x) { return x.id !== e.id && mob10(x.mobile) === m; })[0] || null; }
+  function nearOf(e, within) { if (!e.lat || !e.lng) return []; return S.sites.filter(function (x) { return x.id !== e.id; }).map(function (x) { return { s: x, d: dist(e, x) }; }).filter(function (o) { return o.d != null && o.d <= within; }).sort(function (a, b) { return a.d - b.d; }); }
+  function locate() {
+    return new Promise(function (ok, bad) {
+      if (!navigator.geolocation) { bad(new Error("This phone cannot give a location.")); return; }
+      navigator.geolocation.getCurrentPosition(function (p) { ok({ lat: Number(p.coords.latitude.toFixed(6)), lng: Number(p.coords.longitude.toFixed(6)), acc: Math.round(p.coords.accuracy || 0) }); },
+        function () { bad(new Error("Location not found - turn on location and try again.")); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+    });
+  }
   function canMap() { return S.user && (S.user.role === "mapper" || S.user.role === "admin"); }
   /* 1.2.0 - everyone adds sites; a site is edited by whoever entered it, or the mapper / owner */
   function canEdit(s) { return canMap() || (S.user && s && String(s.createdBy || "").toLowerCase() === String(S.user.name).toLowerCase()); }
@@ -79,6 +102,18 @@ textarea{min-height:90px}
     var q = outbox(); if (!q.length || S.flushing) return Promise.resolve();
     S.flushing = true;
     var job = q[0];
+    if (job.visit) {   /* 2.0.0 - a visit waiting to go up */
+      return call("visit", { visit: job.visit }).then(function (r) {
+        if (!r.ok) throw new Error(r.error || "Visit not saved");
+        var qq = outbox(); qq.shift(); ls("outbox", qq);
+        if (r.site) upsert(r.site);
+        S.flushing = false; render(); return flush();
+      }).catch(function (e) {
+        S.flushing = false; var m = String(e && e.message || e);
+        if (/not on the list|which site/i.test(m)) { var qq = outbox(); qq.shift(); ls("outbox", qq); S.err = "Visit not saved: " + m; }
+        render();
+      });
+    }
     var p = Promise.resolve(job.site);
     var pend = (job.newPhotos || []).slice();
     pend.forEach(function (b64) {
@@ -92,6 +127,12 @@ textarea{min-height:90px}
       });
     });
     return p.then(function (site) { return call("save", { site: site }); }).then(function (r) {
+      if (!r.ok && r.dup) {   /* 2.0.0 - someone else mapped this client first: keep his, drop ours */
+        var q2 = outbox(); q2.shift(); ls("outbox", q2);
+        S.sites = S.sites.filter(function (x) { return x.id !== job.site.id; }); ls("sites", S.sites);
+        S.err = "Not added - " + r.error + " on " + dmy(r.dup.createdAt) + ". Open it from the list and use Mark visit.";
+        S.flushing = false; if (S.open === job.site.id) S.view = "list"; render(); return flush();
+      }
       if (!r.ok) throw new Error(r.error || "Not saved");
       var qq = outbox(); qq.shift(); ls("outbox", qq);
       upsert(r.site);
@@ -117,12 +158,12 @@ textarea{min-height:90px}
       S.busy = false;
       if (!r.ok && r.mustChange) { S.user.mustChange = true; ls("user", S.user); S.view = "pin"; render(); return; }   /* 1.1.0 */
       if (!r.ok) { if (/wrong name|pin/i.test(r.error || "")) { signOut(); } S.err = r.error || "Could not load"; render(); return; }
-      S.sites = r.sites || []; S.stages = r.stages || S.stages; S.partners = r.partners || [];
-      ls("sites", S.sites); ls("stages", S.stages); if (canMap()) ls("partners", S.partners); else ls("partners", null);
+      S.sites = r.sites || []; S.visits = r.visits || []; S.stages = r.stages || S.stages; S.partners = r.partners || [];
+      ls("sites", S.sites); ls("visits", S.visits); ls("stages", S.stages); if (canMap()) ls("partners", S.partners); else ls("partners", null);
       S.err = ""; ls("pulledAt", Date.now()); render();
     }).catch(function () { S.busy = false; S.err = "No signal - showing what this phone already has."; render(); });
   }
-  function signOut() { ["user", "sites", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
+  function signOut() { ["user", "sites", "visits", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
 
   /* ---------- screens ---------- */
   function top() {
@@ -139,13 +180,21 @@ textarea{min-height:90px}
       '<p class="meta" style="text-align:center">Version ' + APP_VERSION + '</p></div>';
   }
   function list() {
-    var q = S.q.trim().toLowerCase();
+    var q = S.q.trim().toLowerCase(), me = String(S.user.name).toLowerCase();
     var rows = S.sites.filter(function (s) { if (!q) return true; return [s.client, s.mobile, s.address, s.area, s.architect, s.builder, s.stage].join(" ").toLowerCase().indexOf(q) >= 0; });
+    if (S.filter === "missing") rows = rows.filter(function (s) { return missing(s).length; });
+    if (S.filter === "mine") rows = rows.filter(function (s) { return String(s.createdBy || "").toLowerCase() === me || visitsOf(s.id).some(function (v) { return String(v.by).toLowerCase() === me; }); });
+    if (S.filter === "near" && S.here) rows = rows.map(function (s) { return { s: s, d: dist(S.here, s) }; }).filter(function (o) { return o.d != null; }).sort(function (a, b) { return a.d - b.d; }).map(function (o) { o.s._d = o.d; return o.s; });
+    var nMiss = S.sites.filter(function (s) { return missing(s).length; }).length;
+    var chip = function (k, lab) { return '<button class="btn sm ' + (S.filter === k ? '' : 'ghost') + '" data-a="filter" data-k="' + k + '">' + lab + '</button>'; };
     var ob = outbox().length;
     var h = top() + '<div class="wrap">' +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       (ob ? '<div class="note">' + ob + ' site' + (ob > 1 ? 's' : '') + ' waiting to go up - they go as soon as there is signal. <button class="btn sm" data-a="flush">Send now</button></div>' : '') +
+      installBar() +
       '<input id="q" placeholder="Search name, mobile, area, architect…" value="' + esc(S.q) + '">' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + chip("all", "All") + chip("near", "Near me") + chip("missing", "Arch / builder missing (" + nMiss + ")") + chip("mine", "Mine") + '</div>' +
+      (S.filter === "near" && !S.here ? '<div class="meta" style="margin-top:6px">' + (S.locErr ? esc(S.locErr) : 'Finding where you are…') + '</div>' : '') +
       '<div class="meta" style="margin:8px 2px">' + rows.length + ' of ' + S.sites.length + ' sites</div>';
     if (!rows.length) h += '<div class="empty">' + (S.sites.length ? 'Nothing matches.' : ('No sites yet. Tap "+ New site" to add the first one.')) + '</div>';
     h += rows.slice(0, 300).map(function (s) {
@@ -154,8 +203,10 @@ textarea{min-height:90px}
         (ph[0] ? '<img src="' + esc(ph[0]) + '" alt="" style="float:right;width:64px;height:64px;object-fit:cover;border-radius:8px;margin-left:8px" loading="lazy">' : '') +
         '<h3>' + esc(s.client || "(no name)") + '</h3>' +
         '<div class="meta">' + esc([s.address, s.area].filter(Boolean).join(", ")) + '</div>' +
-        '<div>' + (s.stage ? '<span class="pill">' + esc(s.stage) + '</span>' : '') + (s.architect ? '<span class="pill">Arch: ' + esc(s.architect) + '</span>' : '') + (s.builder ? '<span class="pill">Builder: ' + esc(s.builder) + '</span>' : '') + '</div>' +
-        '<div class="meta">' + esc(dmy(s.createdAt)) + (s.createdBy ? ' · ' + esc(s.createdBy) : '') + '</div><div style="clear:both"></div></div>';
+        '<div>' + (s.stage ? '<span class="pill">' + esc(s.stage) + '</span>' : '') + (s.architect ? '<span class="pill">Arch: ' + esc(s.architect) + '</span>' : '') + (s.builder ? '<span class="pill">Builder: ' + esc(s.builder) + '</span>' : '') +
+        (missing(s).length ? '<span class="pill warn">Ask: ' + missing(s).join(" & ") + '</span>' : '') + '</div>' +
+        (function () { var vs = visitsOf(s.id); return '<div class="meta">' + esc(dmy(s.createdAt)) + (s.createdBy ? ' · ' + esc(s.createdBy) : '') + ' · ' + (vs.length ? vs.length + ' visit' + (vs.length > 1 ? 's' : '') + ', last ' + esc(dmy(vs[0].at)) : 'no visits yet') + (s._d != null && S.filter === "near" ? ' · <b>' + mtr(s._d) + ' away</b>' : '') + '</div>'; })() +
+        '<div style="clear:both"></div></div>';
     }).join("");
     h += '<div style="text-align:center;margin-top:20px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
       (S.user.role === "admin" ? '<button class="btn ghost sm" data-a="people">People</button>' : '') +
@@ -186,7 +237,14 @@ textarea{min-height:90px}
       (mob ? '<a class="btn sm" href="tel:' + esc(mob) + '">Call</a><a class="btn sm dk" href="https://wa.me/91' + esc(mob) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
       (ml ? '<a class="btn sm dk" href="' + esc(ml) + '" target="_blank" rel="noopener">Open in Maps</a>' : '') +
       (canEdit(s) ? '<button class="btn sm ghost" data-a="edit" data-id="' + esc(s.id) + '">Edit</button>' : '') +
-      '</div></div></div>';
+      '</div>' + (missing(s).length ? '<div class="note" style="margin-top:10px"><b>' + esc(missing(s).join(" and ")) + ' not known yet.</b> Ask at the site and add it with Mark visit.</div>' : '') +
+      '<div style="margin-top:10px"><button class="btn" data-a="visit" data-id="' + esc(s.id) + '" style="width:100%">Mark visit here</button></div></div>' +
+      (function () {
+        var vs = visitsOf(s.id);
+        return '<div class="card"><h3 style="margin:0 0 6px">Visits (' + vs.length + ')</h3>' + (vs.length ? vs.map(function (v) {
+          return '<div style="border-top:1px solid var(--line);padding:8px 0"><b>' + esc(dmy(v.at)) + '</b> · ' + esc(v.by) + (v.stage ? ' · <span class="pill">' + esc(v.stage) + '</span>' : '') + (v.note ? '<div style="white-space:pre-wrap">' + esc(v.note) + '</div>' : '') + '</div>';
+        }).join("") : '<div class="meta">No visits marked yet. Tap Mark visit when you are at the site.</div>') + '</div>';
+      })() + '</div>';
   }
   function field(id, lab, v, extra) { return '<label for="' + id + '">' + lab + '</label><input id="' + id + '" value="' + esc(v || "") + '"' + (extra || "") + '>'; }
   function form() {
@@ -197,10 +255,10 @@ textarea{min-height:90px}
     return top() + '<div class="wrap"><button class="btn ghost sm" data-a="cancel">‹ Back</button>' +
       '<div class="card"><h2 style="margin:0 0 4px">' + (e.id ? 'Edit site' : 'New site') + '</h2>' +
       field("f_client", "Client name", e.client) +
-      field("f_mobile", "Mobile (10 digits)", e.mobile, ' inputmode="tel"') +
+      field("f_mobile", "Mobile (10 digits)", e.mobile, ' inputmode="tel"') + '<div id="dupbox">' + dupBox(e) + '</div>' +
       field("f_address", "Site address (plot, sector)", e.address) +
       '<div class="row"><div>' + field("f_area", "Area / colony", e.area) + '</div><div>' + field("f_city", "City", e.city || "Panipat") + '</div></div>' +
-      '<label>Site location</label><div class="meta" id="gpsmsg">' + esc(gps) + '</div><button class="btn sm dk" data-a="gps" style="margin-top:6px">Use my current location</button>' +
+      '<label>Site location</label><div class="meta" id="gpsmsg">' + esc(gps) + '</div><button class="btn sm dk" data-a="gps" style="margin-top:6px">Use my current location</button>' + nearBox(e) +
       '<label for="f_stage">Stage of work</label><select id="f_stage"><option value=""></option>' + stages.map(function (x) { return '<option' + (x === e.stage ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join("") + '</select>' +
       '<label for="f_architect">Architect</label><input id="f_architect" data-pick="Architect" autocomplete="off" value="' + esc(e.architect || "") + '"><div id="sg_f_architect"></div>' +
       '<label for="f_builder">Builder / PMC</label><input id="f_builder" data-pick="Builder" autocomplete="off" value="' + esc(e.builder || "") + '"><div id="sg_f_builder"></div>' +
@@ -210,6 +268,47 @@ textarea{min-height:90px}
       '<label class="btn sm dk" style="display:inline-flex;align-items:center;margin-top:6px;color:#fff">+ Add photo<input id="f_photo" type="file" accept="image/*" capture="environment" multiple style="display:none"></label>' +
       (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
       '<div style="margin-top:14px"><button class="btn" data-a="save" style="width:100%">Save site</button></div></div></div>';
+  }
+  /* 2.0.0 - the same client already mapped (same mobile): open it, or say it is a different site */
+  function dupBox(e) {
+    var d = dupOf(e); if (!d) return "";
+    return '<div class="note warn" style="margin-top:8px"><b>Already mapped:</b> ' + esc(d.client || "") + ' - ' + esc([d.address, d.area].filter(Boolean).join(", ")) + ' (by ' + esc(d.createdBy || "") + ', ' + esc(dmy(d.createdAt)) + ', ' + visitsOf(d.id).length + ' visits)' +
+      '<div class="acts"><button class="btn sm" data-a="open" data-id="' + esc(d.id) + '">Open it</button><button class="btn sm dk" data-a="visit" data-id="' + esc(d.id) + '">Mark a visit to it</button>' +
+      (e._force ? '<span class="meta">Saving as a different site.</span>' : '<button class="btn sm ghost" data-a="force">It is a different site</button>') + '</div></div>';
+  }
+  /* 2.0.0 - sites already mapped within 150 m of where he stands */
+  function nearBox(e) {
+    var n = nearOf(e, 150); if (!n.length) return e.lat ? '<div class="meta" style="margin-top:6px">No other site mapped within 150 m.</div>' : "";
+    return '<div class="note warn" style="margin-top:8px"><b>' + n.length + ' site' + (n.length > 1 ? 's' : '') + ' already mapped nearby</b> - is it one of these?' + n.slice(0, 5).map(function (o) {
+      return '<div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:6px 0;margin-top:6px"><div style="flex:1">' + esc(o.s.client || "") + ' <span class="meta">' + esc(o.s.address || "") + ' · ' + mtr(o.d) + '</span></div><button class="btn sm dk" data-a="visit" data-id="' + esc(o.s.id) + '">Mark visit</button></div>';
+    }).join("") + '</div>';
+  }
+  /* 2.0.0 - Mark visit: where he stands, the stage he sees, a note; and the architect / builder if still missing */
+  function visitScreen() {
+    var v = S.vis, s = S.sites.filter(function (x) { return x.id === v.siteId; })[0] || {};
+    var stages = (S.stages.length ? S.stages : ls("stages") || []), m = missing(s), d = dist(v, s);
+    return top() + '<div class="wrap"><button class="btn ghost sm" data-a="vcancel">‹ Back</button>' +
+      '<div class="card"><h2 style="margin:0 0 2px">Visit: ' + esc(s.client || "") + '</h2><div class="meta">' + esc([s.address, s.area].filter(Boolean).join(", ")) + ' · visit no. ' + (visitsOf(s.id).length + 1) + '</div>' +
+      '<label>Where you are</label><div class="meta" id="vgps">' + (v.lat ? 'Location taken' + (d != null ? ' - ' + mtr(d) + ' from the site pin' : '') + (d != null && d > 300 ? ' <b>(far from the site - are you at the right site?)</b>' : '') : (v.locErr ? esc(v.locErr) : 'Finding your location…')) + '</div>' +
+      '<label for="v_stage">Stage of work now</label><select id="v_stage"><option value=""></option>' + stages.map(function (x) { return '<option' + (x === (v.stage || s.stage) ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join("") + '</select>' +
+      (m.length ? '<div class="note warn" style="margin-top:10px"><b>Please ask at the site:</b> ' + esc(m.join(" and ")) + ' not known yet.' +
+        (m.indexOf("architect") >= 0 ? '<label for="f_architect">Architect</label><input id="f_architect" data-pick="Architect" autocomplete="off" value="' + esc(v.architect || "") + '" placeholder="Leave empty if still not known"><div id="sg_f_architect"></div>' : '') +
+        (m.indexOf("builder") >= 0 ? '<label for="f_builder">Builder / PMC</label><input id="f_builder" data-pick="Builder" autocomplete="off" value="' + esc(v.builder || "") + '" placeholder="Leave empty if still not known"><div id="sg_f_builder"></div>' : '') + '</div>' : '') +
+      '<label for="v_note">Note</label><textarea id="v_note" placeholder="Who you met, what was discussed, next step">' + esc(v.note || "") + '</textarea>' +
+      (S.err ? '<div class="note err">' + esc(S.err) + '</div>' : '') +
+      '<div style="margin-top:14px"><button class="btn" data-a="vsave" style="width:100%">Save visit</button></div></div></div>';
+  }
+  /* 2.0.0 - "Install the app" for everyone who opens it in the browser */
+  var instEvt = null;
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); instEvt = e; try { render(); } catch (x) { } });
+  function standalone() { return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true; }
+  function installBar() {
+    if (standalone()) return "";
+    var no = Number(ls("instNo") || 0); if (no && Date.now() - no < 3 * 86400000) return "";
+    var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    return '<div class="note" style="margin-bottom:10px"><b>Install Saysha Site Map on this phone</b> - it opens like an app and works with no signal.' +
+      '<div class="acts">' + (instEvt ? '<button class="btn sm" data-a="install">Install app</button>' : '<span class="meta">' + (ios ? 'Tap the Share button, then "Add to Home Screen".' : 'Tap the browser menu (⋮), then "Install app" or "Add to Home screen".') + '</span>') +
+      '<button class="btn sm ghost" data-a="instno">Not now</button></div></div>';
   }
   /* 1.1.0 - his own PIN. The first one is the last 4 digits of his mobile; he replaces it at once. */
   function pinScreen() {
@@ -247,6 +346,7 @@ textarea{min-height:90px}
     else if (S.user.mustChange || S.view === "pin") app.innerHTML = pinScreen();
     else if (S.view === "people") app.innerHTML = peopleScreen();
     else if (S.view === "form") app.innerHTML = form();
+    else if (S.view === "visit" && S.vis) app.innerHTML = visitScreen();
     else if (S.view === "detail") app.innerHTML = detail();
     else app.innerHTML = list();
     if (keep === "q") { var q = document.getElementById("q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
@@ -328,6 +428,36 @@ textarea{min-height:90px}
       return;
     }
     if (a === "flush") { flush(); return; }
+    if (a === "filter") {
+      S.filter = t.getAttribute("data-k"); S.locErr = "";
+      if (S.filter === "near") { S.here = null; locate().then(function (p) { S.here = p; render(); }).catch(function (e) { S.locErr = e.message; render(); }); }
+      render(); return;
+    }
+    if (a === "install") { if (instEvt) { instEvt.prompt(); instEvt.userChoice.then(function () { instEvt = null; render(); }); } return; }
+    if (a === "instno") { ls("instNo", Date.now()); render(); return; }
+    if (a === "force") { readForm(); S.edit._force = true; render(); return; }
+    if (a === "visit") {
+      if (S.view === "form") readForm();
+      S.backTo = S.view === "form" ? "form" : "detail";
+      S.vis = { id: "V-" + Date.now() + "-" + Math.floor(Math.random() * 900 + 100), siteId: t.getAttribute("data-id"), at: new Date().toISOString() };
+      S.err = ""; S.view = "visit"; render(); window.scrollTo(0, 0);
+      var vv = S.vis; locate().then(function (p) { if (S.vis === vv) { vv.lat = p.lat; vv.lng = p.lng; vv.acc = p.acc; render(); } }).catch(function (e) { if (S.vis === vv) { vv.locErr = e.message + " The visit can still be saved."; render(); } });
+      return;
+    }
+    if (a === "vcancel") { S.view = S.backTo === "form" && S.edit ? "form" : "detail"; if (S.view === "detail") S.open = S.vis.siteId; S.vis = null; S.err = ""; render(); return; }
+    if (a === "vsave") {
+      var v = S.vis, g = function (id) { var x = document.getElementById(id); return x ? x.value.trim() : ""; };
+      v.stage = g("v_stage"); v.note = g("v_note"); v.architect = g("f_architect"); v.builder = g("f_builder");
+      var job = { id: v.id, siteId: v.siteId, at: v.at, lat: v.lat || "", lng: v.lng || "", acc: v.acc || "", stage: v.stage, note: v.note, architect: v.architect, builder: v.builder };
+      var q = outbox(); q.push({ visit: job }); ls("outbox", q);
+      S.visits = (S.visits || []).concat([{ id: v.id, siteId: v.siteId, at: v.at, by: S.user.name, stage: v.stage, note: v.note }]); ls("visits", S.visits);
+      var st = S.sites.filter(function (x) { return x.id === v.siteId; })[0];
+      if (st) { if (v.stage) st.stage = v.stage; if (v.architect && !st.architect) st.architect = v.architect; if (v.builder && !st.builder) st.builder = v.builder; ls("sites", S.sites); }
+      if (S.backTo === "form") S.edit = null;   /* he chose the site already on the list: the new one is not made */
+      S.open = v.siteId; S.vis = null; S.view = "detail"; S.err = ""; render(); window.scrollTo(0, 0);
+      toast("Visit saved - sending…"); flush().then(function () { if (!outbox().length) toast("Visit sent."); });
+      return;
+    }
     if (a === "signout") { if (outbox().length && !confirmTwice(t)) return; signOut(); return; }
     if (a === "open") { S.open = t.getAttribute("data-id"); S.view = "detail"; render(); window.scrollTo(0, 0); return; }
     if (a === "back") { S.view = "list"; S.err = ""; render(); return; }
@@ -340,7 +470,7 @@ textarea{min-height:90px}
       var msg = document.getElementById("gpsmsg"); if (msg) msg.textContent = "Finding the location…";
       if (!navigator.geolocation) { if (msg) msg.textContent = "This phone cannot give a location."; return; }
       navigator.geolocation.getCurrentPosition(function (p) {
-        S.edit.lat = Number(p.coords.latitude.toFixed(6)); S.edit.lng = Number(p.coords.longitude.toFixed(6)); S.edit.acc = Math.round(p.coords.accuracy || 0); render();
+        S.edit.lat = Number(p.coords.latitude.toFixed(6)); S.edit.lng = Number(p.coords.longitude.toFixed(6)); S.edit.acc = Math.round(p.coords.accuracy || 0); render();   /* 2.0.0 - nearBox shows sites already mapped here */
       }, function () { if (msg) msg.textContent = "Location not found - turn on location and try again."; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
       return;
     }
@@ -350,8 +480,11 @@ textarea{min-height:90px}
       if (!e.client && !e.address) { S.err = "Give the client's name or the site address."; render(); return; }
       if (e.mobile && mob.length !== 10) { S.err = "The mobile number needs 10 digits."; render(); return; }
       e.mobile = mob;
+      if (!e.id && dupOf(e) && !e._force) { S.err = "This client is already mapped - open it, mark a visit to it, or tap 'It is a different site'."; render(); return; }   /* 2.0.0 */
+      e.mobile = mob;
       if (!e.id) e.id = "SK-" + Date.now() + "-" + Math.floor(Math.random() * 900 + 100);   /* made here, so sending twice never makes two */
       var site = {}; ["id", "client", "mobile", "address", "area", "city", "lat", "lng", "acc", "stage", "architect", "builder", "measure", "notes", "photos"].forEach(function (k) { if (e[k] !== undefined) site[k] = e[k]; });
+      if (e._force) site.force = true;
       var q = outbox(); q.push({ site: site, newPhotos: e._new || [] });
       if (!ls("outbox", q) && outbox().length !== q.length) { S.err = "This phone is out of space - send the waiting sites first."; render(); return; }
       var shown = Object.assign({ createdAt: e.createdAt || new Date().toISOString(), createdBy: e.createdBy || S.user.name }, site);
@@ -367,6 +500,7 @@ textarea{min-height:90px}
     var t = ev.target;
     if (t.id === "q") { S.q = t.value; var y = window.scrollY; render(); window.scrollTo(0, y); return; }
     if (t.getAttribute && t.getAttribute("data-pick")) suggest(t);
+    if (t.id === "f_mobile" && S.edit) { S.edit.mobile = t.value; var db = document.getElementById("dupbox"); if (db) db.innerHTML = dupBox(S.edit); }
   });
   document.addEventListener("change", function (ev) {
     var t = ev.target; if (t.id !== "f_photo" || !t.files || !t.files.length) return;
@@ -377,7 +511,7 @@ textarea{min-height:90px}
   window.addEventListener("online", function () { flush(); });
 
   /* ---------- start ---------- */
-  S.user = ls("user"); S.sites = ls("sites") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
+  S.user = ls("user"); S.sites = ls("sites") || []; S.visits = ls("visits") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
   render();
   if (S.user) { flush().then(pull); }
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js"); } catch (e) { } }
@@ -390,9 +524,10 @@ textarea{min-height:90px}
       var m = String(t).match(/var APP_VERSION = "([0-9.]+)"/);
       if (!m || !newer(m[1], APP_VERSION)) return;
       if (S.view === "form" || outbox().length) return;
-      location.replace("./?u=" + Date.now());
+      ls("updFrom", APP_VERSION); location.replace("./?u=" + Date.now());
     }).catch(function () { });
   }
+  try { var uf = ls("updFrom"); if (uf && uf !== APP_VERSION) { ls("updFrom", null); setTimeout(function () { toast("Updated to version " + APP_VERSION + "."); }, 800); } } catch (e) { }
   setTimeout(checkVersion, 2000); setInterval(checkVersion, 30 * 60000);
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") checkVersion(); });
   window.__sk = { S: S, render: render, setApi: function (u) { API = u; } };
