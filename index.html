@@ -55,7 +55,7 @@ input[type=date]{min-height:44px}
 <script>
 (function () {
   "use strict";
-  var APP_VERSION = "2.2.0";
+  var APP_VERSION = "2.3.0";
   /* the Saysha Site Map web app address (Deploy -> Web app -> URL ending /exec) */
   var API = "https://script.google.com/macros/s/AKfycbylcqcOso5Vb0yXdqOSMGD3BVkpJARoup87NdtPO5V3HWnEjFEnxH587i8f3-1vQfNR/exec";
   var K = "sk_";
@@ -190,7 +190,7 @@ input[type=date]{min-height:44px}
       S.err = ""; ls("pulledAt", Date.now()); render();
     }).catch(function () { S.busy = false; S.err = "No signal - showing what this phone already has."; render(); });
   }
-  function signOut() { ["user", "sites", "visits", "showroom", "partners", "pulledAt"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
+  function signOut() { ["user", "sites", "visits", "showroom", "partners", "pulledAt", "resume"].forEach(function (k) { ls(k, null); }); S.user = null; S.sites = []; S.partners = []; S.view = "list"; render(); }
 
   /* ---------- screens ---------- */
   function top() {
@@ -476,6 +476,7 @@ input[type=date]{min-height:44px}
     else if (S.tab === "showroom") app.innerHTML = showroomHome();
     else app.innerHTML = list();
     if (keep === "q") { var q = document.getElementById("q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+    try { keepSoon(); } catch (e) { }   /* 2.3.0 */
   }
 
   /* ---------- the architect / builder picker: the list is on the mapper's phone only ---------- */
@@ -676,8 +677,48 @@ input[type=date]{min-height:44px}
   });
   window.addEventListener("online", function () { flush(); });
 
+  /* ---------- 2.3.0 - BACK WHERE YOU WERE AFTER A RELOAD ----------
+     His ask (13 Oct 2026): a half-filled form must survive the phone reloading the page. On many Android
+     phones opening the camera, a call, or switching apps can throw the page away; it came back on the list
+     with the typing gone. Now the screen and whatever is typed (and the photos taken but not yet saved)
+     are kept on this phone as you go, and put back when the app opens again - same person, within 12 hours.
+     Saving or cancelling clears it, because the kept copy is simply the screen as it now is. */
+  function grab() {
+    try {
+      if (S.view === "form" && S.edit) readForm();
+      else if (S.view === "visit" && S.vis) { var g2 = function (id) { var x = document.getElementById(id); return x ? x.value : undefined; }; var a1 = { v_stage: "stage", v_note: "note", f_architect: "architect", f_builder: "builder" }; Object.keys(a1).forEach(function (id) { var v = g2(id); if (v !== undefined) S.vis[a1[id]] = v; }); }
+      else if (S.view === "srform" && S.sr) readSr();
+    } catch (e) { }
+  }
+  function keepNow() {
+    if (!S.user) return;
+    grab();
+    var snap = { u: S.user.name, at: Date.now(), view: S.view, tab: S.tab, open: S.open, filter: S.filter, q: S.q, srq: S.srq, backTo: S.backTo, edit: S.edit, vis: S.vis, sr: S.sr };
+    try { localStorage.setItem(K + "resume", JSON.stringify(snap)); }
+    catch (e) {   /* no room for the new photos: keep the typing at least */
+      try { var e2 = S.edit ? Object.assign({}, S.edit, { _new: [], _lostPics: (S.edit._new || []).length }) : null; localStorage.setItem(K + "resume", JSON.stringify(Object.assign({}, snap, { edit: e2 }))); } catch (e3) { }
+    }
+  }
+  var _keepT = null;
+  function keepSoon() { clearTimeout(_keepT); _keepT = setTimeout(keepNow, 300); }
+  function resume() {
+    var r = ls("resume"); if (!r || !S.user || r.u !== S.user.name || !(Date.now() - r.at < 12 * 3600000)) return;
+    S.tab = r.tab || "sites"; S.filter = r.filter || "all"; S.q = r.q || ""; S.srq = r.srq || ""; S.backTo = r.backTo; S.open = r.open || null;
+    var typed = false;
+    if (r.view === "form" && r.edit) { S.edit = r.edit; S.edit._new = S.edit._new || []; S.view = "form"; typed = true; }
+    else if (r.view === "visit" && r.vis) { S.vis = r.vis; S.edit = r.edit || null; S.view = "visit"; typed = true; }
+    else if (r.view === "srform" && r.sr) { S.sr = r.sr; S.view = "srform"; typed = true; }
+    else if (r.view === "detail" && r.open && S.sites.some(function (x) { return x.id === r.open; })) S.view = "detail";
+    if (typed) setTimeout(function () { toast("Back where you were" + (r.edit && r.edit._lostPics ? " - " + r.edit._lostPics + " new photo(s) could not be kept, please take them again" : " - nothing typed was lost") + "."); }, 600);
+  }
+  document.addEventListener("input", keepSoon, true);
+  document.addEventListener("change", keepSoon, true);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") keepNow(); });
+  window.addEventListener("pagehide", keepNow);
+
   /* ---------- start ---------- */
   S.user = ls("user"); S.sites = ls("sites") || []; S.visits = ls("visits") || []; S.showroom = ls("showroom") || []; S.stages = ls("stages") || []; S.partners = (S.user && canMap()) ? (ls("partners") || []) : [];
+  try { resume(); } catch (e) { }   /* 2.3.0 */
   render();
   if (S.user) { flush().then(pull); }
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js"); } catch (e) { } }
@@ -689,7 +730,7 @@ input[type=date]{min-height:44px}
     fetch("index.html?v=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) {
       var m = String(t).match(/var APP_VERSION = "([0-9.]+)"/);
       if (!m || !newer(m[1], APP_VERSION)) return;
-      if (S.view === "form" || outbox().length) return;
+      if (S.view === "form" || S.view === "visit" || S.view === "srform" || outbox().length) return;   /* 2.3.0 - any half-filled form */
       ls("updFrom", APP_VERSION); location.replace("./?u=" + Date.now());
     }).catch(function () { });
   }
